@@ -779,13 +779,17 @@ def simulate_stage():
                 
         single_tournament["third_place_standings"] = third_place_list
         
-        # Build Round of 32 pairings
+        # Build Round of 32 pairings (Interleaved to mix bracket paths)
         r32_pairs = []
-        for g1, g2 in [("A","B"),("C","D"),("E","F"),("G","H"),("I","J"),("K","L")]:
-            r32_pairs.append((group_standings[g1][0], group_standings[g2][1]))
-            r32_pairs.append((group_standings[g2][0], group_standings[g1][1]))
-        for i in range(0, 8, 2):
-            r32_pairs.append((advancing_3rd[i], advancing_3rd[i+1]))
+        for i in range(4):
+            # Match 0: 1st vs 3rd
+            r32_pairs.append((group_standings[GROUPS[i*2]][0], advancing_3rd[i*2]))
+            # Match 1: 2nd vs 2nd
+            r32_pairs.append((group_standings[GROUPS[i]][1], group_standings[GROUPS[7-i]][1]))
+            # Match 2: 1st vs 3rd
+            r32_pairs.append((group_standings[GROUPS[i*2+1]][0], advancing_3rd[i*2+1]))
+            # Match 3: 1st vs 2nd
+            r32_pairs.append((group_standings[GROUPS[8+i]][0], group_standings[GROUPS[11-i]][1]))
             
         # Populate R32 fixtures
         r32_fixtures = []
