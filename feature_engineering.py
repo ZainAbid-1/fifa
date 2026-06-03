@@ -23,7 +23,7 @@ OUT_DIR.mkdir(exist_ok=True)
 RESULTS_FILE  = DATA_DIR / "results_2018_onwards.csv"
 TEAMS_FILE    = DATA_DIR / "teams_2026.csv"
 ELO_FILE      = DATA_DIR / "elo_ratings.csv"
-EA_FILE       = DATA_DIR / "fifa_team_ratings_updated.csv"
+EA_FILE       = DATA_DIR / "squad_team_ratings.csv"
 SQUAD_FILE    = DATA_DIR / "squad_values.csv"
 
 # ── Tournament importance weights (mirrors eloratings.net K-factor logic) ──
@@ -467,9 +467,9 @@ def run():
     hist_df = pd.DataFrame(hist_rows)
     hist_df = add_targets(hist_df, results)
     hist_df.to_csv(OUT_DIR / "match_features.csv", index=False)
-    print(f"  → match_features.csv  ({len(hist_df)} rows × {len(hist_df.columns)} cols)")
+    print(f"  -> match_features.csv  ({len(hist_df)} rows x {len(hist_df.columns)} cols)")
 
-    # ── Upcoming WC 2026 fixtures ─────────────────────────────────────────
+    # -- Upcoming WC 2026 fixtures -----------------------------------------
     print("Assembling WC 2026 fixture features...")
     upcoming = results[results["home_score"].isna()].copy()
     wc_rows = []
@@ -481,9 +481,9 @@ def run():
         )
     wc_df = pd.DataFrame(wc_rows)
     wc_df.to_csv(OUT_DIR / "wc2026_features.csv", index=False)
-    print(f"  → wc2026_features.csv ({len(wc_df)} rows × {len(wc_df.columns)} cols)")
+    print(f"  -> wc2026_features.csv ({len(wc_df)} rows x {len(wc_df.columns)} cols)")
 
-    # ── Feature summary ────────────────────────────────────────────────────
+    # -- Feature summary ----------------------------------------------------
     print("\n" + "="*60)
     print("FEATURE GROUPS SUMMARY")
     print("="*60)

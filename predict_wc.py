@@ -15,7 +15,7 @@ Reads:   output/wc2026_features.csv
          models/xgb_goals_away.json
          models/feature_columns.json
          data/teams_2026.csv
-         data/fifa_team_ratings_updated.csv
+         data/squad_team_ratings.csv
 
 Saves:   output/simulation_results.csv
 
@@ -110,7 +110,7 @@ def load_all():
 
     wc       = pd.read_csv(OUT_DIR / "wc2026_features.csv")
     teams_df = pd.read_csv(DATA_DIR / "teams_2026.csv")
-    ea_df    = pd.read_csv(DATA_DIR / "fifa_team_ratings_updated.csv")
+    ea_df    = pd.read_csv(DATA_DIR / "squad_team_ratings.csv")
 
     return om, gh, ga, feature_cols, wc, teams_df, ea_df
 
