@@ -1,0 +1,123 @@
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  height: var(--nav-h);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.navbar-inner {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  gap: 40px;
+}
+
+.navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.navbar-logo {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  background: linear-gradient(135deg, var(--cyan), var(--pink));
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.navbar-logo-year {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.8rem;
+  color: white;
+  letter-spacing: 0.05em;
+}
+
+.navbar-logo-num {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.4rem;
+  color: white;
+  line-height: 1;
+}
+
+.navbar-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+
+.navbar-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--text);
+}
+
+.navbar-sub {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.navbar-links {
+  display: flex;
+  list-style: none;
+  gap: 4px;
+  flex: 1;
+  justify-content: center;
+}
+
+.navbar-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 0.87rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: var(--transition);
+  letter-spacing: 0.02em;
+  position: relative;
+}
+
+.navbar-link:hover {
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+
+.navbar-link.active {
+  color: var(--cyan);
+  background: var(--cyan-dim);
+}
+
+.navbar-link-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 6px var(--cyan);
+}
+
+.navbar-right {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+@media (max-width: 768px) {
+  .navbar-brand-text { display: none; }
+  .navbar-links { gap: 2px; }
+  .navbar-link { padding: 7px 12px; font-size: 0.8rem; }
+  .navbar-right { display: none; }
+}

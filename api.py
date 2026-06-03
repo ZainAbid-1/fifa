@@ -19,13 +19,10 @@ Endpoints:
 import time
 import json
 import math
-import threading
-import queue
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
@@ -155,18 +152,6 @@ def ratings_to_df(computed_ratings: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ── Global simulation state ────────────────────────────────────────────────────
-
-sim_state = {
-    "running":   False,
-    "progress":  0,
-    "total":     0,
-    "results":   [],      # list of {team, win_pct, final_pct, sf_pct, qf_pct}
-    "stop_flag": False,
-    "queue":     queue.Queue(),
-}
-
-
 # ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app_state = {}
@@ -230,16 +215,6 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "World Cup 2026 API is running."}
-
-
-@app.get("/api/simulate_tournament")
-def simulate_tournament():
-    results_path = Path("output/simulation_results.csv")
-    if not results_path.exists():
-        return {"error": "Simulation results not found. Run predict_wc.py first."}
-    df = pd.read_csv(results_path)
-    data = df.to_dict(orient="records")
-    return {"results": data}
 
 
 class PredictMatchRequest(BaseModel):
@@ -378,20 +353,6 @@ def get_squads():
     squad_state      = app_state["squad_state"]
     computed_ratings = app_state["computed_ratings"]
 
-    # Load base sim results if available for win%
-    win_pcts = {}
-    results_path = Path("output/simulation_results.csv")
-    if results_path.exists():
-        sim_df = pd.read_csv(results_path)
-        for _, row in sim_df.iterrows():
-            win_pcts[row["team"]] = {
-                "win_pct":   row.get("p_winner", 0),
-                "final_pct": row.get("p_final",  0),
-                "sf_pct":    row.get("p_sf",     0),
-                "qf_pct":    row.get("p_qf",     0),
-                "r32_pct":   row.get("p_r32",    0),
-            }
-
     teams_out = []
     for team, players in squad_state.items():
         rating = computed_ratings.get(team, {"overall":70,"attack":70,"midfield":70,"defense":70})
@@ -399,12 +360,11 @@ def get_squads():
             "team":          team,
             "confederation": get_confederation(team),
             "rating":        rating,
-            "sim_results":   win_pcts.get(team, {"win_pct":0,"final_pct":0,"sf_pct":0,"qf_pct":0,"r32_pct":0}),
             "players":       players,
         })
 
-    # Sort by win_pct descending
-    teams_out.sort(key=lambda x: x["sim_results"]["win_pct"], reverse=True)
+    # Sort alphabetically since static win percentages are removed
+    teams_out.sort(key=lambda x: x["team"])
     return {"teams": teams_out}
 
 
@@ -484,157 +444,461 @@ def _update_ea_df(team: str, new_rating: dict):
 
 
 # =============================================================================
-# BACKGROUND SIMULATION + SSE
+# NEW SQUAD ENDPOINTS
 # =============================================================================
 
-class RunSimRequest(BaseModel):
-    sims: int = 5000
-    seed: int = 42
 
+# ── Single Tournament Simulator ──────────────────────────────────────────────
 
-@app.post("/api/run_simulation")
-def run_simulation(req: RunSimRequest):
-    """
-    Launch a background Monte Carlo simulation using the CURRENT squad state
-    (respecting any injuries already set).  Results stream via /api/simulation_stream.
-    """
-    if sim_state["running"]:
-        return {"status": "already_running", "progress": sim_state["progress"],
-                "total": sim_state["total"]}
+GROUPS = list("ABCDEFGHIJKL")
 
-    # Build a live ea_df from current computed ratings
-    live_ea_df = ratings_to_df(app_state["computed_ratings"])
+single_tournament = {
+    "stage": "not_started", # "not_started", "group_stage", "r32", "r16", "qf", "sf", "final", "finished"
+    "fixtures": {},         # stage_name -> list of matches
+    "standings": {},        # group_name -> list of team standing dicts
+    "third_place_standings": [],
+    "r32_winners": [],
+    "r16_winners": [],
+    "qf_winners": [],
+    "sf_winners": [],
+    "champion": None,
+    "seed": 42
+}
 
-    # Snapshot everything needed (so mid-run changes don't corrupt the sim)
-    snapshot = {
-        "fixture_data": app_state["fixture_data"],
-        "ko_lookup":    app_state["ko_lookup"],
-        "elo_map":      dict(app_state["elo_map"]),
-        "teams_df":     app_state["teams_df"],
-        "om":           app_state["om"],
-        "gh_model":     app_state["gh_model"],
-        "ga_model":     app_state["ga_model"],
-        "feature_cols": app_state["feature_cols"],
-        "wc":           app_state["wc"],
-        "ea_df":        live_ea_df,
-        "n_sims":       req.sims,
-        "seed":         req.seed,
+def sample_ko_match_detailed(home, away, form_tracker, rng, ea_df):
+    """Simulate a knockout match and return rich metadata about goals/extra time/shootouts."""
+    om = app_state["om"]
+    gh_model = app_state["gh_model"]
+    ga_model = app_state["ga_model"]
+    feature_cols = app_state["feature_cols"]
+    ko_lookup = app_state["ko_lookup"]
+    wc = app_state["wc"]
+    teams_df = app_state["teams_df"]
+    elo_map = app_state["elo_map"]
+
+    fd = predict_wc.make_ko_features(
+        home, away, elo_map, om, gh_model, ga_model,
+        feature_cols, ko_lookup, wc, teams_df, form_tracker
+    )
+
+    gh_90, ga_90 = predict_wc.sample_match(fd, rng)
+    gh_total = gh_90
+    ga_total = ga_90
+    extra_time = False
+    penalties = False
+    pen_winner = None
+    win_reason = "90m"
+    pen_home_score = 0
+    pen_away_score = 0
+
+    if gh_90 == ga_90:
+        extra_time = True
+        et_h, et_a = predict_wc.sample_extra_time(fd, rng)
+        gh_total += et_h
+        ga_total += et_a
+        win_reason = "ET"
+
+        if gh_total == ga_total:
+            penalties = True
+            win_reason = "penalties"
+            p_home = predict_wc.penalty_win_prob(home, away, ea_df)
+            
+            # Simple shootout scoring simulation
+            if rng.random() < p_home:
+                winner = home
+                pen_winner = home
+                pen_home_score = 5
+                pen_away_score = rng.choice([3, 4])
+            else:
+                winner = away
+                pen_winner = away
+                pen_home_score = rng.choice([3, 4])
+                pen_away_score = 5
+        else:
+            winner = home if gh_total > ga_total else away
+    else:
+        winner = home if gh_90 > ga_90 else away
+
+    return {
+        "home_goals": gh_total,
+        "away_goals": ga_total,
+        "home_goals_90": gh_90,
+        "away_goals_90": ga_90,
+        "extra_time": extra_time,
+        "penalties": penalties,
+        "pen_winner": pen_winner,
+        "pen_home_score": int(pen_home_score),
+        "pen_away_score": int(pen_away_score),
+        "winner": winner,
+        "win_reason": win_reason
     }
 
-    # Reset sim state
-    sim_state["running"]   = True
-    sim_state["stop_flag"] = False
-    sim_state["progress"]  = 0
-    sim_state["total"]     = req.sims
-    sim_state["results"]   = []
-    # Drain old queue
-    while not sim_state["queue"].empty():
-        try: sim_state["queue"].get_nowait()
-        except: pass
 
-    t = threading.Thread(target=_run_simulation_thread, args=(snapshot,), daemon=True)
-    t.start()
+@app.post("/api/tournament/start")
+def start_tournament(seed: Optional[int] = None):
+    """Reset the step-by-step tournament simulation to the Group Stage."""
+    if "teams_df" not in app_state or "fixture_data" not in app_state:
+        raise HTTPException(status_code=503, detail="API models/data not fully loaded yet.")
+        
+    teams_df = app_state["teams_df"]
+    fixture_data = app_state["fixture_data"]
+    
+    selected_seed = seed if seed is not None else int(time.time() * 1000) % 100000
+    single_tournament["seed"] = selected_seed
+    
+    # Initialize Group Stage Fixtures
+    group_fixtures = []
+    for idx, fd in enumerate(fixture_data):
+        group_fixtures.append({
+            "id": f"group_{fd['group']}_{idx}",
+            "home": fd["home"],
+            "away": fd["away"],
+            "group": fd["group"],
+            "venue": f"{fd['city']}, {fd['country']}",
+            "home_goals": None,
+            "away_goals": None,
+            "played": False,
+            "winner": None,
+            "win_reason": None,
+            "extra_time": False,
+            "penalties": False
+        })
+    
+    # Initialize Group Standings
+    standings = {}
+    for group in GROUPS:
+        g_teams = teams_df[teams_df["group"] == group]["team"].tolist()
+        standings[group] = [
+            {"team": t, "played": 0, "won": 0, "drawn": 0, "lost": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0}
+            for t in g_teams
+        ]
+        
+    single_tournament.update({
+        "stage": "group_stage",
+        "fixtures": {
+            "group_stage": group_fixtures,
+            "r32": [],
+            "r16": [],
+            "qf": [],
+            "sf": [],
+            "final": []
+        },
+        "standings": standings,
+        "third_place_standings": [],
+        "r32_winners": [],
+        "r16_winners": [],
+        "qf_winners": [],
+        "sf_winners": [],
+        "champion": None
+    })
+    
+    return {"status": "started", "stage": "group_stage", "seed": selected_seed}
 
-    return {"status": "started", "sims": req.sims}
+
+@app.get("/api/tournament/state")
+def get_tournament_state():
+    """Get the current state of the step-by-step single tournament simulation."""
+    return single_tournament
 
 
-def _run_simulation_thread(snapshot: dict):
-    """Background thread: run Monte Carlo sims and push updates to queue."""
-    n_sims       = snapshot["n_sims"]
-    master_rng   = np.random.default_rng(snapshot["seed"])
-    seeds        = master_rng.integers(0, 2**31, size=n_sims)
-    all_teams    = snapshot["teams_df"]["team"].tolist()
-    counts       = {t: defaultdict(int) for t in all_teams}
-    STAGE_ORDER  = ["group","r32","r16","qf","sf","final","winner"]
-    BATCH        = max(50, n_sims // 100)   # send update every ~1%
+@app.post("/api/tournament/simulate_stage")
+def simulate_stage():
+    """Simulate matches for the current stage and progress the tournament to the next stage."""
+    stage = single_tournament["stage"]
+    if stage == "not_started":
+        raise HTTPException(status_code=400, detail="Tournament not started. Call /api/tournament/start first.")
+    if stage == "finished":
+        return {"status": "finished", "message": "Tournament is already finished.", "champion": single_tournament["champion"]}
+        
+    if "teams_df" not in app_state or "fixture_data" not in app_state:
+        raise HTTPException(status_code=503, detail="API models/data not fully loaded yet.")
 
-    try:
-        for i, s in enumerate(seeds):
-            if sim_state["stop_flag"]:
-                break
-
-            rng = np.random.default_rng(int(s))
-            res = predict_wc.simulate_one(
-                snapshot["fixture_data"], snapshot["ko_lookup"], snapshot["elo_map"],
-                snapshot["teams_df"], snapshot["om"], snapshot["gh_model"],
-                snapshot["ga_model"], snapshot["feature_cols"],
-                snapshot["wc"], rng, ea_df=snapshot["ea_df"]
-            )
-            for team, stage in res.items():
-                counts[team][stage] += 1
-
-            sim_state["progress"] = i + 1
-
-            # Push batch update to SSE queue
-            if (i + 1) % BATCH == 0 or i == n_sims - 1:
-                done = i + 1
-                results = []
-                for team in all_teams:
-                    sc = counts[team]
-                    cumulative = 0
-                    probs = {}
-                    for stage in reversed(STAGE_ORDER):
-                        cumulative += sc.get(stage, 0)
-                        probs[f"p_{stage}"] = round(cumulative / done * 100, 2)
-                    results.append({"team": team, **probs})
-                results.sort(key=lambda x: x["p_winner"], reverse=True)
-
-                sim_state["results"] = results
-                sim_state["queue"].put({
-                    "progress": done,
-                    "total":    n_sims,
-                    "pct":      round(done / n_sims * 100, 1),
-                    "results":  results,
+    rng = np.random.default_rng(single_tournament["seed"])
+    live_ea_df = ratings_to_df(app_state["computed_ratings"])
+    
+    if stage == "group_stage":
+        # Simulate all 72 Group Matches
+        fixtures = single_tournament["fixtures"]["group_stage"]
+        fixture_data = app_state["fixture_data"]
+        
+        # Build mapping for quick probability lookup
+        fd_map = {(fd["home"], fd["away"]): fd for fd in fixture_data}
+        
+        # Reset standings tracker
+        pts = defaultdict(int)
+        gf = defaultdict(int)
+        gd = defaultdict(int)
+        won = defaultdict(int)
+        drawn = defaultdict(int)
+        lost = defaultdict(int)
+        played = defaultdict(int)
+        
+        for m in fixtures:
+            # Look up fixture data
+            key = (m["home"], m["away"])
+            fd = fd_map.get(key)
+            if not fd:
+                # Reverse lookup
+                fd = fd_map.get((m["away"], m["home"]))
+                if fd:
+                    fd = {
+                        "p_H": fd["p_A"], "p_D": fd["p_D"], "p_A": fd["p_H"],
+                        "exp_h": fd["exp_a"], "exp_a": fd["exp_h"]
+                    }
+                    
+            if not fd:
+                # Fallback if not found (shouldn't happen)
+                fd = {"p_H": 0.45, "p_D": 0.25, "p_A": 0.30, "exp_h": 1.5, "exp_a": 1.2}
+                
+            gh, ga = predict_wc.sample_match(fd, rng)
+            m["home_goals"] = int(gh)
+            m["away_goals"] = int(ga)
+            m["played"] = True
+            
+            played[m["home"]] += 1
+            played[m["away"]] += 1
+            gf[m["home"]] += gh
+            gf[m["away"]] += ga
+            gd[m["home"]] += (gh - ga)
+            gd[m["away"]] += (ga - gh)
+            
+            if gh > ga:
+                m["winner"] = m["home"]
+                m["win_reason"] = "90m"
+                pts[m["home"]] += 3
+                won[m["home"]] += 1
+                lost[m["away"]] += 1
+            elif ga > gh:
+                m["winner"] = m["away"]
+                m["win_reason"] = "90m"
+                pts[m["away"]] += 3
+                won[m["away"]] += 1
+                lost[m["home"]] += 1
+            else:
+                m["winner"] = None
+                m["win_reason"] = "90m"
+                pts[m["home"]] += 1
+                pts[m["away"]] += 1
+                drawn[m["home"]] += 1
+                drawn[m["away"]] += 1
+                
+        # Re-compute and sort standings for each group
+        teams_df = app_state["teams_df"]
+        group_standings = {}
+        
+        for group in GROUPS:
+            g_teams = teams_df[teams_df["group"] == group]["team"].tolist()
+            
+            # Populate stats
+            group_stats = []
+            for t in g_teams:
+                group_stats.append({
+                    "team": t,
+                    "played": int(played[t]),
+                    "won": int(won[t]),
+                    "drawn": int(drawn[t]),
+                    "lost": int(lost[t]),
+                    "gf": int(gf[t]),
+                    "ga": int(gf[t] - gd[t]), # ga = gf - gd
+                    "gd": int(gd[t]),
+                    "pts": int(pts[t])
                 })
-    finally:
-        sim_state["running"]   = False
-        sim_state["stop_flag"] = False
-        # Final sentinel
-        sim_state["queue"].put({"done": True, "progress": sim_state["progress"],
-                                "total": n_sims})
-
-
-@app.get("/api/simulation_stream")
-async def simulation_stream():
-    """
-    Server-Sent Events stream.  Subscribe after calling /api/run_simulation.
-    Each event is JSON: {progress, total, pct, results:[{team, p_winner, ...}]}
-    Final event has {done: true}.
-    """
-    def generate():
-        yield "retry: 1000\n\n"   # client reconnect interval
-        while True:
-            try:
-                msg = sim_state["queue"].get(timeout=30)
-                yield f"data: {json.dumps(msg)}\n\n"
-                if msg.get("done"):
-                    break
-            except queue.Empty:
-                # heartbeat so the connection doesn't time out
-                yield ": heartbeat\n\n"
-
-    return StreamingResponse(generate(),
-                             media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache",
-                                      "X-Accel-Buffering": "no"})
-
-
-@app.post("/api/stop_simulation")
-def stop_simulation():
-    """Signal the background simulation to stop after the current batch."""
-    if not sim_state["running"]:
-        return {"status": "not_running"}
-    sim_state["stop_flag"] = True
-    return {"status": "stopping", "progress": sim_state["progress"]}
-
-
-@app.get("/api/simulation_status")
-def simulation_status():
-    """Poll-based alternative to SSE."""
+                
+            # Sort by pts desc, gd desc, gf desc (FIFA tiebreakers)
+            group_stats.sort(key=lambda x: (x["pts"], x["gd"], x["gf"]), reverse=True)
+            single_tournament["standings"][group] = group_stats
+            group_standings[group] = [x["team"] for x in group_stats]
+            
+        # Determine 3rd place advancement
+        third_place_list = []
+        for group in GROUPS:
+            # 3rd team is at index 2
+            t = group_standings[group][2]
+            third_place_list.append({
+                "team": t,
+                "group": group,
+                "pts": int(pts[t]),
+                "gd": int(gd[t]),
+                "gf": int(gf[t]),
+                "advanced": False
+            })
+            
+        # Sort best 3rd place teams
+        third_place_list.sort(key=lambda x: (x["pts"], x["gd"], x["gf"]), reverse=True)
+        
+        # Top 8 advance
+        advancing_3rd = []
+        for idx in range(12):
+            if idx < 8:
+                third_place_list[idx]["advanced"] = True
+                advancing_3rd.append(third_place_list[idx]["team"])
+                
+        single_tournament["third_place_standings"] = third_place_list
+        
+        # Build Round of 32 pairings
+        r32_pairs = []
+        for g1, g2 in [("A","B"),("C","D"),("E","F"),("G","H"),("I","J"),("K","L")]:
+            r32_pairs.append((group_standings[g1][0], group_standings[g2][1]))
+            r32_pairs.append((group_standings[g2][0], group_standings[g1][1]))
+        for i in range(0, 8, 2):
+            r32_pairs.append((advancing_3rd[i], advancing_3rd[i+1]))
+            
+        # Populate R32 fixtures
+        r32_fixtures = []
+        for idx, (h, a) in enumerate(r32_pairs):
+            r32_fixtures.append({
+                "id": f"r32_{idx}",
+                "home": h,
+                "away": a,
+                "venue": "Neutral Venue",
+                "home_goals": None,
+                "away_goals": None,
+                "played": False,
+                "winner": None,
+                "win_reason": None,
+                "extra_time": False,
+                "penalties": False,
+                "pen_winner": None,
+                "pen_home_score": 0,
+                "pen_away_score": 0
+            })
+            
+        single_tournament["fixtures"]["r32"] = r32_fixtures
+        single_tournament["stage"] = "r32"
+        
+    else:
+        # Knockout stage simulation (r32, r16, qf, sf, final)
+        fixtures = single_tournament["fixtures"][stage]
+        
+        # Initialize Form Tracker from Group Stage match results
+        form_tracker = predict_wc.FormTracker()
+        for m in single_tournament["fixtures"]["group_stage"]:
+            form_tracker.update(m["home"], m["away"], m["home_goals"], m["away_goals"])
+            
+        # Update Form Tracker with previous KO stages results
+        ko_stages = ["r32", "r16", "qf", "sf"]
+        for s in ko_stages:
+            if s in single_tournament["fixtures"] and single_tournament["fixtures"][s]:
+                for m in single_tournament["fixtures"][s]:
+                    if m.get("played"):
+                        form_tracker.update(m["home"], m["away"], m["home_goals"], m["away_goals"])
+                        
+        winners = []
+        for m in fixtures:
+            res = sample_ko_match_detailed(m["home"], m["away"], form_tracker, rng, live_ea_df)
+            m.update({
+                "home_goals": int(res["home_goals"]),
+                "away_goals": int(res["away_goals"]),
+                "played": True,
+                "winner": res["winner"],
+                "win_reason": res["win_reason"],
+                "extra_time": res["extra_time"],
+                "penalties": res["penalties"],
+                "pen_winner": res["pen_winner"],
+                "pen_home_score": int(res["pen_home_score"]),
+                "pen_away_score": int(res["pen_away_score"])
+            })
+            winners.append(res["winner"])
+            
+        if stage == "r32":
+            single_tournament["r32_winners"] = winners
+            r16_fixtures = []
+            for i in range(0, 16, 2):
+                r16_fixtures.append({
+                    "id": f"r16_{i//2}",
+                    "home": winners[i],
+                    "away": winners[i+1],
+                    "venue": "Neutral Venue",
+                    "home_goals": None,
+                    "away_goals": None,
+                    "played": False,
+                    "winner": None,
+                    "win_reason": None,
+                    "extra_time": False,
+                    "penalties": False,
+                    "pen_winner": None,
+                    "pen_home_score": 0,
+                    "pen_away_score": 0
+                })
+            single_tournament["fixtures"]["r16"] = r16_fixtures
+            single_tournament["stage"] = "r16"
+            
+        elif stage == "r16":
+            single_tournament["r16_winners"] = winners
+            qf_fixtures = []
+            for i in range(0, 8, 2):
+                qf_fixtures.append({
+                    "id": f"qf_{i//2}",
+                    "home": winners[i],
+                    "away": winners[i+1],
+                    "venue": "Neutral Venue",
+                    "home_goals": None,
+                    "away_goals": None,
+                    "played": False,
+                    "winner": None,
+                    "win_reason": None,
+                    "extra_time": False,
+                    "penalties": False,
+                    "pen_winner": None,
+                    "pen_home_score": 0,
+                    "pen_away_score": 0
+                })
+            single_tournament["fixtures"]["qf"] = qf_fixtures
+            single_tournament["stage"] = "qf"
+            
+        elif stage == "qf":
+            single_tournament["qf_winners"] = winners
+            sf_fixtures = []
+            for i in range(0, 4, 2):
+                sf_fixtures.append({
+                    "id": f"sf_{i//2}",
+                    "home": winners[i],
+                    "away": winners[i+1],
+                    "venue": "Neutral Venue",
+                    "home_goals": None,
+                    "away_goals": None,
+                    "played": False,
+                    "winner": None,
+                    "win_reason": None,
+                    "extra_time": False,
+                    "penalties": False,
+                    "pen_winner": None,
+                    "pen_home_score": 0,
+                    "pen_away_score": 0
+                })
+            single_tournament["fixtures"]["sf"] = sf_fixtures
+            single_tournament["stage"] = "sf"
+            
+        elif stage == "sf":
+            single_tournament["sf_winners"] = winners
+            final_fixtures = [{
+                "id": "final_0",
+                "home": winners[0],
+                "away": winners[1],
+                "venue": "MetLife Stadium, New York/New Jersey",
+                "home_goals": None,
+                "away_goals": None,
+                "played": False,
+                "winner": None,
+                "win_reason": None,
+                "extra_time": False,
+                "penalties": False,
+                "pen_winner": None,
+                "pen_home_score": 0,
+                "pen_away_score": 0
+            }]
+            single_tournament["fixtures"]["final"] = final_fixtures
+            single_tournament["stage"] = "final"
+            
+        elif stage == "final":
+            single_tournament["champion"] = winners[0]
+            single_tournament["stage"] = "finished"
+            
+    # Advance the seed slightly for the next stages
+    single_tournament["seed"] = int(single_tournament["seed"] * 31 + 17) % 1000000
+    
     return {
-        "running":  sim_state["running"],
-        "progress": sim_state["progress"],
-        "total":    sim_state["total"],
-        "pct":      round(sim_state["progress"] / max(sim_state["total"], 1) * 100, 1),
-        "results":  sim_state["results"],
+        "status": "simulated",
+        "stage_completed": stage,
+        "next_stage": single_tournament["stage"]
     }
