@@ -231,12 +231,34 @@ def predict_match(req: PredictMatchRequest):
     teams_df  = app_state["teams_df"]
 
     try:
-        fd = predict_wc.make_ko_features(
-            req.team_a, req.team_b, elo_map,
-            app_state["om"], app_state["gh_model"], app_state["ga_model"],
-            app_state["feature_cols"], ko_lookup, app_state["wc"], teams_df,
-            form_tracker=None
-        )
+        # Check pre-computed first for group matches
+        fd = None
+        key = (req.team_a, req.team_b)
+        if key in ko_lookup:
+            fd = ko_lookup[key]
+
+        if not fd:
+            # Build full feature row for KO / unknown match
+            row_dict = feature_engineering.build_match_row(
+                req.team_a, req.team_b, "2026-06-11", True, "FIFA World Cup",
+                app_state["fe_elo_lookup"], app_state["fe_form_df"],
+                app_state["fe_h2h"], app_state["fe_static"]
+            )
+            row_features = [row_dict.get(col, 0) if not pd.isna(row_dict.get(col, 0)) else 0
+                            for col in app_state["feature_cols"]]
+            row_np = np.array([row_features], dtype=np.float32)
+            
+            # Apply altitude to the full row
+            if req.venue:
+                row_np[0] = predict_wc.apply_altitude_to_row(
+                    row_np[0], app_state["feature_cols"],
+                    req.venue, req.team_a, req.team_b, elo_map)
+
+            probs = app_state["om"].predict_proba(row_np)[0]
+            exp_h = float(np.clip(app_state["gh_model"].predict(row_np)[0], 0.3, 8))
+            exp_a = float(np.clip(app_state["ga_model"].predict(row_np)[0], 0.3, 8))
+            fd = {"p_H": probs[2], "p_D": probs[1], "p_A": probs[0], "exp_h": exp_h, "exp_a": exp_a}
+
         elo_a = elo_map.get(req.team_a, 1500)
         elo_b = elo_map.get(req.team_b, 1500)
         elo_diff = abs(elo_a - elo_b)
@@ -256,9 +278,9 @@ def predict_match(req: PredictMatchRequest):
         return {
             "team_a":       req.team_a,
             "team_b":       req.team_b,
-            "win_prob_a":   fd["p_H"],
-            "draw_prob":    fd["p_D"],
-            "win_prob_b":   fd["p_A"],
+            "win_prob_a":   float(fd["p_H"]),
+            "draw_prob":    float(fd["p_D"]),
+            "win_prob_b":   float(fd["p_A"]),
             "chaos_potential": {"is_trap_game": is_trap_game, "score": round(chaos_score, 2)},
             "context":      context,
             "penalty_metrics": {
@@ -467,19 +489,41 @@ single_tournament = {
 
 def sample_ko_match_detailed(home, away, form_tracker, rng, ea_df):
     """Simulate a knockout match and return rich metadata about goals/extra time/shootouts."""
-    om = app_state["om"]
-    gh_model = app_state["gh_model"]
-    ga_model = app_state["ga_model"]
-    feature_cols = app_state["feature_cols"]
-    ko_lookup = app_state["ko_lookup"]
-    wc = app_state["wc"]
-    teams_df = app_state["teams_df"]
-    elo_map = app_state["elo_map"]
+    
+    # Use full feature engineering instead of the bugged np.zeros in make_ko_features
+    fe_static_copy = app_state["fe_static"].copy(deep=True)
+    # Get live ea ratings in case of injuries
+    for t in [home, away]:
+        live_mask = ea_df["team"] == t
+        if live_mask.any():
+            static_mask = fe_static_copy["team"] == t
+            if static_mask.any():
+                fe_static_copy.loc[static_mask, "ea_attack"] = ea_df.loc[live_mask, "attack"].values[0]
+                fe_static_copy.loc[static_mask, "ea_defense"] = ea_df.loc[live_mask, "defense"].values[0]
+                fe_static_copy.loc[static_mask, "ea_midfield"] = ea_df.loc[live_mask, "midfield"].values[0]
 
-    fd = predict_wc.make_ko_features(
-        home, away, elo_map, om, gh_model, ga_model,
-        feature_cols, ko_lookup, wc, teams_df, form_tracker
+    row_dict = feature_engineering.build_match_row(
+        home, away, "2026-06-11", True, "FIFA World Cup",
+        app_state["fe_elo_lookup"], app_state["fe_form_df"],
+        app_state["fe_h2h"], fe_static_copy
     )
+    
+    # Inject momentum
+    if form_tracker is not None:
+        elo_h = row_dict["elo_home"] + form_tracker.momentum_bonus(home)
+        elo_a = row_dict["elo_away"] + form_tracker.momentum_bonus(away)
+        row_dict["elo_diff"] = elo_h - elo_a
+        row_dict["elo_win_prob_h"] = feature_engineering.win_probability(elo_h + 100, elo_a)
+        row_dict["elo_win_prob_a"] = 1.0 - row_dict["elo_win_prob_h"]
+
+    row_features = [row_dict.get(col, 0) if not pd.isna(row_dict.get(col, 0)) else 0
+                    for col in app_state["feature_cols"]]
+    row_np = np.array([row_features], dtype=np.float32)
+
+    probs = app_state["om"].predict_proba(row_np)[0]
+    exp_h = float(np.clip(app_state["gh_model"].predict(row_np)[0], 0.3, 8))
+    exp_a = float(np.clip(app_state["ga_model"].predict(row_np)[0], 0.3, 8))
+    fd = {"p_H": probs[2], "p_D": probs[1], "p_A": probs[0], "exp_h": exp_h, "exp_a": exp_a}
 
     gh_90, ga_90 = predict_wc.sample_match(fd, rng)
     gh_total = gh_90
