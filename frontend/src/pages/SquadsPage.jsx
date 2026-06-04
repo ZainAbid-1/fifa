@@ -174,13 +174,7 @@ function RatingBar({ label, value, max = 100 }) {
 function TeamCard({ team, confederation, rating, players, onSelect }) {
   const confColor = CONF_COLOR[confederation] || CONF_COLOR.OTHER;
   const injured = players.filter(p => p.injured).length;
-  const [view, setView] = useState(0);
   const code = FLAG_MAP[team] || 'un';
-
-  const toggleView = (e) => {
-    e.stopPropagation();
-    setView(v => (v === 0 ? 1 : 0));
-  };
 
   const getStars = (ovr) => {
     if(ovr >= 85) return 5;
@@ -201,15 +195,13 @@ function TeamCard({ team, confederation, rating, players, onSelect }) {
         </div>
 
         <div className="fc-card-middle">
-          <button className="fc-nav-arrow left" onClick={toggleView}>◀</button>
           <div className="fc-flag-wrap">
             {code === 'un' ? (
                <div className="fc-flag-fallback" style={{ background: confColor + '20', color: confColor }}>{team.slice(0,2).toUpperCase()}</div>
             ) : (
-               <img src={`https://flagcdn.com/w160/${code}.png`} alt={team} className="fc-flag" />
+               <img src={`https://flagcdn.com/w320/${code}.png`} alt={team} className="fc-flag" />
             )}
           </div>
-          <button className="fc-nav-arrow right" onClick={toggleView}>▶</button>
         </div>
 
         <div className="fc-card-stars">
@@ -217,37 +209,20 @@ function TeamCard({ team, confederation, rating, players, onSelect }) {
         </div>
 
         <div className="fc-card-bottom">
-          {view === 0 ? (
-            <div className="fc-stats-view">
-              <div className="fc-stat-col">
-                <span className="fc-stat-label">ATT</span>
-                <span className="fc-stat-val">{Math.round(rating.attack)}-</span>
-              </div>
-              <div className="fc-stat-col">
-                <span className="fc-stat-label">MID</span>
-                <span className="fc-stat-val">{Math.round(rating.midfield)}-</span>
-              </div>
-              <div className="fc-stat-col">
-                <span className="fc-stat-label">DEF</span>
-                <span className="fc-stat-val">{Math.round(rating.defense)}-</span>
-              </div>
+          <div className="fc-stats-view">
+            <div className="fc-stat-col">
+              <span className="fc-stat-label">ATT</span>
+              <span className="fc-stat-val">{Math.round(rating.attack)}-</span>
             </div>
-          ) : (
-            <div className="fc-info-view">
-              <div className="fc-info-row">
-                <span className="fc-info-label">OVR:</span>
-                <span className="fc-info-val" style={{color: ratingColor(rating.overall)}}>{Math.round(rating.overall)}</span>
-              </div>
-              <div className="fc-info-row">
-                <span className="fc-info-label">Players:</span>
-                <span className="fc-info-val">{players.length}</span>
-              </div>
-              <div className="fc-info-row">
-                <span className="fc-info-label">Injured:</span>
-                <span className="fc-info-val" style={{color: injured > 0 ? '#ff3d5a' : '#c8f000'}}>{injured}</span>
-              </div>
+            <div className="fc-stat-col">
+              <span className="fc-stat-label">MID</span>
+              <span className="fc-stat-val">{Math.round(rating.midfield)}-</span>
             </div>
-          )}
+            <div className="fc-stat-col">
+              <span className="fc-stat-label">DEF</span>
+              <span className="fc-stat-val">{Math.round(rating.defense)}-</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -319,6 +294,7 @@ export default function SquadsPage() {
   const [error, setError]             = useState(null);
   const [search, setSearch]           = useState('');
   const [confFilter, setConfFilter]   = useState('All');
+  const [sortBy, setSortBy]           = useState('overall');
   const [selected, setSelected]       = useState(null);
   const [updating, setUpdating]       = useState(null);
 
@@ -330,12 +306,22 @@ export default function SquadsPage() {
   }, []);
 
   const filtered = useMemo(() => {
-    return squads.filter(t => {
+    let result = squads.filter(t => {
       const matchSearch = t.team.toLowerCase().includes(search.toLowerCase());
       const matchConf   = confFilter === 'All' || t.confederation === confFilter;
       return matchSearch && matchConf;
     });
-  }, [squads, search, confFilter]);
+
+    result.sort((a, b) => {
+      if (sortBy === 'overall') return b.rating.overall - a.rating.overall;
+      if (sortBy === 'attack') return b.rating.attack - a.rating.attack;
+      if (sortBy === 'defense') return b.rating.defense - a.rating.defense;
+      if (sortBy === 'midfield') return b.rating.midfield - a.rating.midfield;
+      return 0;
+    });
+
+    return result;
+  }, [squads, search, confFilter, sortBy]);
 
   const selectedData = useMemo(() =>
     selected ? squads.find(t => t.team === selected) : null,
@@ -400,6 +386,17 @@ export default function SquadsPage() {
               </button>
             ))}
           </div>
+          <select 
+            className="input squads-search" 
+            style={{ width: 'auto', minWidth: '150px' }} 
+            value={sortBy} 
+            onChange={e => setSortBy(e.target.value)}
+          >
+            <option value="overall">Sort: Overall</option>
+            <option value="attack">Sort: Attack</option>
+            <option value="midfield">Sort: Midfield</option>
+            <option value="defense">Sort: Defense</option>
+          </select>
           <span className="label text-muted" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
             {filtered.length} teams
           </span>
