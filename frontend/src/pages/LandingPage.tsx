@@ -211,7 +211,7 @@ export default function LandingPage() {
                 <span className="text-[var(--gold)] font-semibold">One champion.</span>
               </p>
 
-              <div className="hero-cta flex gap-4 flex-wrap">
+              <div className="hero-cta flex gap-8 flex-wrap mt-4">
                 <button
                   className="btn btn-primary btn-xl group"
                   onClick={() => navigate('/simulator')}
@@ -381,7 +381,7 @@ export default function LandingPage() {
             ) : (
               <div className="flex flex-col gap-1">
                 {/* Header */}
-                <div className="grid grid-cols-[48px_1fr_90px_90px_110px_80px] items-center px-2 py-3 text-[0.65rem] font-bold tracking-[0.12em] uppercase text-[var(--text-dim)] border-b border-[var(--border)]">
+                <div className="grid grid-cols-[48px_1fr_90px_90px_110px_80px] items-center px-6 py-5 text-[0.65rem] font-bold tracking-[0.12em] uppercase text-[var(--text-dim)] border-b border-[var(--border)]">
                   <span className="text-center">#</span>
                   <span>Team</span>
                   <span className="text-center">AI Rank</span>
@@ -393,7 +393,7 @@ export default function LandingPage() {
                 {leaderboard.map((row, i) => (
                   <div
                     key={row.team}
-                    className="grid grid-cols-[48px_1fr_90px_90px_110px_80px] items-center px-2 py-3 rounded-lg transition-all duration-200 hover:bg-[var(--bg-elevated)]"
+                    className="grid grid-cols-[48px_1fr_90px_90px_110px_80px] items-center px-6 py-5 rounded-lg transition-all duration-200 hover:bg-[var(--bg-elevated)]"
                   >
                     <span className="text-center">
                       <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${

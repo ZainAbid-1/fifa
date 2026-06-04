@@ -12,12 +12,12 @@ function ProbBar({ labelA, labelB, probA, probB, probD }: {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex justify-between text-[0.7rem] font-bold tracking-[0.08em] uppercase">
+      <div className="flex justify-between text-[0.7rem] font-bold tracking-[0.08em] uppercase mb-1">
         <span className="text-[var(--cyan)]">{labelA}</span>
         <span className="text-[var(--text-dim)]">Draw</span>
         <span className="text-[var(--magenta)]">{labelB}</span>
       </div>
-      <div className="flex h-10 rounded-lg overflow-hidden bg-[var(--bg-elevated)]">
+      <div className="flex h-14 rounded-xl overflow-hidden bg-[var(--bg-elevated)] shadow-inner">
         <div className="flex items-center justify-center text-xs font-bold text-black/70 transition-all duration-700"
           style={{ width: `${pA}%`, background: 'linear-gradient(135deg, var(--cyan), #0099cc)', minWidth: pA > 0 ? 4 : 0 }}>
           {pA >= 12 && <span>{pA}%</span>}
@@ -31,7 +31,7 @@ function ProbBar({ labelA, labelB, probA, probB, probD }: {
           {pB >= 12 && <span>{pB}%</span>}
         </div>
       </div>
-      <div className="flex justify-between text-sm font-bold">
+      <div className="flex justify-between text-base font-bold mt-2 px-1">
         <span className="text-[var(--cyan)]">{pA}%</span>
         <span className="text-[var(--text-muted)]">{pD}%</span>
         <span className="text-[var(--magenta)]">{pB}%</span>
@@ -194,7 +194,7 @@ export default function MatchPredictor() {
   return (
     <main className="page pb-20">
       {/* Header */}
-      <div className="page-header">
+      <div className="page-header pt-16 pb-12">
         <div className="container relative">
           <div className="line-accent mx-auto mb-6" />
           <h1 className="display-lg flex items-center justify-center gap-4">
@@ -207,8 +207,8 @@ export default function MatchPredictor() {
         </div>
       </div>
 
-      <div className="container">
-        <div className="grid lg:grid-cols-[420px_1fr] gap-7 items-start">
+      <div className="container px-4 md:px-8 max-w-6xl mx-auto">
+        <div className="grid lg:grid-cols-[460px_1fr] gap-10 lg:gap-16 items-start">
           {/* ── Left Panel: Inputs ── */}
           <div className="flex flex-col gap-0 lg:sticky lg:top-[calc(var(--nav-h)+20px)] animate-up">
             {/* Mode Toggle */}
@@ -222,7 +222,7 @@ export default function MatchPredictor() {
             </div>
 
             {/* Team Selectors */}
-            <div className="card-elevated p-6">
+            <div className="card-elevated p-8">
               <div className="flex items-end gap-3">
                 <div className="col flex-1 gap-2">
                   <label className="label" htmlFor="team-a-select">Home / Team A</label>
@@ -327,7 +327,7 @@ export default function MatchPredictor() {
             {result && !loading && (
               <div className="flex flex-col gap-4 animate-in">
                 {/* Result Header */}
-                <div className="card-elevated p-7">
+                <div className="card-elevated p-8 mb-4">
                   <div className="grid grid-cols-[1fr_auto_1fr] gap-4 items-center mb-6">
                     <div className="flex flex-col gap-1">
                       <span className="font-display text-xl font-bold text-[var(--cyan)]">{result.team_a}</span>

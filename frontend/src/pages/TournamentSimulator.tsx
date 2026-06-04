@@ -274,7 +274,7 @@ export default function TournamentSimulator() {
   return (
     <main className="page pb-20">
       {/* Header */}
-      <div className="page-header">
+      <div className="page-header pt-16 pb-12">
         <div className="container relative">
           <div className="line-accent mx-auto mb-6" />
           <h1 className="display-lg flex items-center justify-center gap-4">
@@ -298,16 +298,22 @@ export default function TournamentSimulator() {
             ))}
           </div>
           {state?.champion && (
-            <div className="flex items-center gap-4 p-4 rounded-lg mt-4" style={{ background: 'var(--gold-dim)', border: '1px solid #F5C51830' }}>
-              <Trophy size={20} className="text-[var(--gold)]" />
-              <span className="label text-[var(--gold)]">World Cup Champion</span>
-              <span className="display-md text-[var(--gold)]">{state.champion}</span>
+            <div className="flex justify-center mt-12 mb-4">
+              <div className="flex flex-col items-center justify-center gap-4 py-8 px-16 rounded-3xl shadow-[0_0_60px_#F5C51830]" style={{ background: 'var(--gold-dim)', border: '2px solid #F5C51840' }}>
+                <div className="flex items-center gap-3">
+                  <Trophy size={28} className="text-[var(--gold)]" />
+                  <span className="label text-[var(--gold)] text-lg tracking-widest">WORLD CUP CHAMPION</span>
+                </div>
+                <span className="text-6xl md:text-7xl font-bold font-display text-[var(--gold)] leading-none text-center">
+                  {state.champion}
+                </span>
+              </div>
             </div>
           )}
         </div>
 
         {/* Actions */}
-        <div className="flex flex-wrap items-center gap-4 mb-6 animate-up delay-1">
+        <div className="flex flex-wrap items-center gap-6 mb-10 animate-up delay-1">
           <button
             id="start-tournament-btn"
             className="btn btn-primary btn-lg"
@@ -354,7 +360,7 @@ export default function TournamentSimulator() {
 
         {/* Tabs */}
         {state && stage !== 'not_started' && (
-          <div className="tab-bar mt-8 mb-8 animate-up delay-2">
+          <div className="tab-bar mt-12 mb-10 animate-up delay-2">
             <button className={`tab-btn ${tab === 'progress' ? 'active' : ''}`} onClick={() => setTab('progress')}>
               <Zap size={12} className="mr-1" /> Current
             </button>

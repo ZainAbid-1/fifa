@@ -191,12 +191,12 @@ function TeamCard({ team, confederation, rating, players, onSelect }: {
       onKeyDown={e => e.key === 'Enter' && onSelect(team)}
     >
       {/* Header */}
-      <div className="flex items-center gap-3 px-5 py-4 border-b" style={{ borderColor: `${confColor}30` }}>
-        <div className="w-11 h-11 rounded-lg flex items-center justify-center text-sm font-bold font-display tracking-wider"
+      <div className="flex items-center gap-4 px-6 py-5 border-b" style={{ borderColor: `${confColor}30` }}>
+        <div className="w-14 h-14 rounded-xl flex items-center justify-center text-lg font-bold font-display tracking-wider"
           style={{ background: `${confColor}20`, color: confColor }}>
           {team.slice(0, 2).toUpperCase()}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 ml-2">
           <h3 className="font-display text-base font-bold tracking-wide truncate">{team}</h3>
           <span className="badge text-[0.6rem] mt-1" style={{ background: `${confColor}18`, color: confColor, border: `1px solid ${confColor}30` }}>
             {confederation}
@@ -208,14 +208,14 @@ function TeamCard({ team, confederation, rating, players, onSelect }: {
       </div>
 
       {/* Bars */}
-      <div className="flex flex-col gap-2 p-4">
+      <div className="flex flex-col gap-5 p-6">
         <RatingBar label="Attack" value={Math.round(rating.attack)} />
         <RatingBar label="Midfield" value={Math.round(rating.midfield)} />
         <RatingBar label="Defense" value={Math.round(rating.defense)} />
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--border)]" style={{ background: 'var(--bg-surface)' }}>
+      <div className="flex items-center justify-between px-6 py-5 border-t border-[var(--border)]" style={{ background: 'var(--bg-surface)' }}>
         <span className="label text-[var(--text-muted)]">{players.length} players</span>
         {injured > 0 && <span className="badge badge-red text-[0.6rem]">{injured} injured</span>}
       </div>
@@ -362,7 +362,7 @@ export default function SquadsPage() {
   return (
     <main className="page pb-20">
       {/* Header */}
-      <div className="page-header">
+      <div className="page-header pt-16 pb-12">
         <div className="container relative">
           <div className="line-accent mx-auto mb-6" />
           <h1 className="display-lg flex items-center justify-center gap-4">
@@ -427,7 +427,7 @@ export default function SquadsPage() {
           )}
 
           {!loading && !error && (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(290px,1fr))] gap-5">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-8">
               {filtered.map(t => (
                 <div key={t.team} className="squad-card-anim">
                   <TeamCard {...t} onSelect={setSelected} />
