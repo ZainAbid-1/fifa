@@ -14,14 +14,7 @@ export default function Navbar() {
       <div className="container navbar-inner">
         <NavLink to="/" className="navbar-brand">
           <div className="navbar-logo">
-            <div className="navbar-logo-block">
-              <span className="navbar-logo-year">World Cup</span>
-              <span className="navbar-logo-num">26</span>
-            </div>
-          </div>
-          <div className="navbar-brand-text">
-            <span className="navbar-title">FIFA</span>
-            <span className="navbar-sub">Simulator AI</span>
+            <img src="/wc26-logo.jpg" alt="WC26 Logo" style={{ height: '40px', borderRadius: '4px' }} />
           </div>
         </NavLink>
 
@@ -39,9 +32,6 @@ export default function Navbar() {
           ))}
         </ul>
 
-        <div className="navbar-right">
-          <span className="badge">⚡ AI Powered</span>
-        </div>
       </div>
     </nav>
   );

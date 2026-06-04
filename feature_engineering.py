@@ -480,6 +480,26 @@ def run():
                             elo_lookup, form_df, h2h, static)
         )
     wc_df = pd.DataFrame(wc_rows)
+
+    # FIX: impute missing EA/squad features with the column median before saving.
+    # Some WC teams (e.g. United States, Czech Republic) may not appear in the
+    # EA ratings file, leaving their ea_overall / ea_attack / etc. as NaN.
+    # Downstream code used fillna(0), which set those teams' squad rating to 0 —
+    # far below the real range of 69–85 — making them look catastrophically weak.
+    # Using the median keeps them at average squad quality; Elo/ranking features
+    # then correctly determine match difficulty.
+    ea_feature_cols = [c for c in wc_df.columns
+                       if any(c.startswith(p) for p in
+                              ("h_ea_", "a_ea_", "diff_ea_",
+                               "h_squad_value", "a_squad_value",
+                               "h_log_squad", "a_log_squad", "diff_squad"))]
+    for col in ea_feature_cols:
+        if wc_df[col].isna().any():
+            col_median = wc_df[col].median()
+            n_filled   = wc_df[col].isna().sum()
+            wc_df[col] = wc_df[col].fillna(col_median)
+            print(f"    [impute] {col}: filled {n_filled} NaN(s) with median={col_median:.4f}")
+
     wc_df.to_csv(OUT_DIR / "wc2026_features.csv", index=False)
     print(f"  -> wc2026_features.csv ({len(wc_df)} rows x {len(wc_df.columns)} cols)")
 

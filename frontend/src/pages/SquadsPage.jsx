@@ -14,6 +14,23 @@ const CONF_COLOR = {
   OTHER:    '#5a6a85',
 };
 
+const FLAG_MAP = {
+  "France": "fr", "Germany": "de", "Spain": "es", "England": "gb-eng", "Portugal": "pt", 
+  "Netherlands": "nl", "Belgium": "be", "Croatia": "hr", "Austria": "at", "Czechia": "cz", 
+  "Serbia": "rs", "Switzerland": "ch", "Denmark": "dk", "Sweden": "se", "Norway": "no", 
+  "Turkey": "tr", "Scotland": "gb-sct", "Ukraine": "ua", "Bosnia-Herzegovina": "ba", "Slovakia": "sk",
+  "Brazil": "br", "Argentina": "ar", "Colombia": "co", "Uruguay": "uy", "Ecuador": "ec", 
+  "Chile": "cl", "Paraguay": "py", "Bolivia": "bo", "Venezuela": "ve", "Peru": "pe",
+  "Morocco": "ma", "Senegal": "sn", "Algeria": "dz", "Egypt": "eg", "Ghana": "gh", 
+  "Ivory Coast": "ci", "Cameroon": "cm", "Tunisia": "tn", "Nigeria": "ng", "South Africa": "za", 
+  "DR Congo": "cd", "Cape Verde": "cv",
+  "United States": "us", "Mexico": "mx", "Canada": "ca", "Jamaica": "jm", "Honduras": "hn", 
+  "El Salvador": "sv", "Costa Rica": "cr", "Haiti": "ht", "Panama": "pa", "Trinidad and Tobago": "tt", "Curacao": "cw",
+  "Japan": "jp", "South Korea": "kr", "Iran": "ir", "Saudi Arabia": "sa", "Australia": "au", 
+  "Qatar": "qa", "Iraq": "iq", "Jordan": "jo", "Uzbekistan": "uz", "New Zealand": "nz",
+  "Italy": "it", "Wales": "gb-wls", "Mali": "ml"
+};
+
 const POS_ORDER = { GK: 0, DEF: 1, MID: 2, FWD: 3 };
 
 function ratingColor(r) {
@@ -157,37 +174,81 @@ function RatingBar({ label, value, max = 100 }) {
 function TeamCard({ team, confederation, rating, players, onSelect }) {
   const confColor = CONF_COLOR[confederation] || CONF_COLOR.OTHER;
   const injured = players.filter(p => p.injured).length;
+  const [view, setView] = useState(0);
+  const code = FLAG_MAP[team] || 'un';
+
+  const toggleView = (e) => {
+    e.stopPropagation();
+    setView(v => (v === 0 ? 1 : 0));
+  };
+
+  const getStars = (ovr) => {
+    if(ovr >= 85) return 5;
+    if(ovr >= 80) return 4;
+    if(ovr >= 75) return 3;
+    if(ovr >= 70) return 2;
+    return 1;
+  };
+  const stars = getStars(rating.overall);
 
   return (
-    <div className="team-card card" onClick={() => onSelect(team)} role="button" tabIndex={0}
+    <div className="fc-card" onClick={() => onSelect(team)} role="button" tabIndex={0}
       onKeyDown={e => e.key === 'Enter' && onSelect(team)}>
-      <div className="team-card-header" style={{ borderColor: confColor + '40' }}>
-        <div className="team-card-flag">
-          <div className="team-card-flag-icon" style={{ background: confColor + '20', color: confColor }}>
-            {team.slice(0, 2).toUpperCase()}
+      
+      <div className="fc-card-inner">
+        <div className="fc-card-top">
+          <h3 className="fc-team-name">{team}</h3>
+        </div>
+
+        <div className="fc-card-middle">
+          <button className="fc-nav-arrow left" onClick={toggleView}>◀</button>
+          <div className="fc-flag-wrap">
+            {code === 'un' ? (
+               <div className="fc-flag-fallback" style={{ background: confColor + '20', color: confColor }}>{team.slice(0,2).toUpperCase()}</div>
+            ) : (
+               <img src={`https://flagcdn.com/w160/${code}.png`} alt={team} className="fc-flag" />
+            )}
           </div>
+          <button className="fc-nav-arrow right" onClick={toggleView}>▶</button>
         </div>
-        <div className="team-card-name-block">
-          <h3 className="team-card-name">{team}</h3>
-          <span className="badge" style={{
-            background: confColor + '18', color: confColor,
-            border: `1px solid ${confColor}30`, fontSize: '0.66rem'
-          }}>{confederation}</span>
-        </div>
-        <div className="team-card-overall" style={{ color: ratingColor(rating.overall) }}>
-          {Math.round(rating.overall)}
-        </div>
-      </div>
 
-      <div className="team-card-bars">
-        <RatingBar label="Attack"   value={Math.round(rating.attack)} />
-        <RatingBar label="Midfield" value={Math.round(rating.midfield)} />
-        <RatingBar label="Defense"  value={Math.round(rating.defense)} />
-      </div>
+        <div className="fc-card-stars">
+          {'★'.repeat(stars)}<span style={{opacity: 0.3}}>{'★'.repeat(5-stars)}</span>
+        </div>
 
-      <div className="team-card-footer">
-        <span className="label text-muted">{players.length} players</span>
-        {injured > 0 && <span className="badge badge-red">{injured} injured</span>}
+        <div className="fc-card-bottom">
+          {view === 0 ? (
+            <div className="fc-stats-view">
+              <div className="fc-stat-col">
+                <span className="fc-stat-label">ATT</span>
+                <span className="fc-stat-val">{Math.round(rating.attack)}-</span>
+              </div>
+              <div className="fc-stat-col">
+                <span className="fc-stat-label">MID</span>
+                <span className="fc-stat-val">{Math.round(rating.midfield)}-</span>
+              </div>
+              <div className="fc-stat-col">
+                <span className="fc-stat-label">DEF</span>
+                <span className="fc-stat-val">{Math.round(rating.defense)}-</span>
+              </div>
+            </div>
+          ) : (
+            <div className="fc-info-view">
+              <div className="fc-info-row">
+                <span className="fc-info-label">OVR:</span>
+                <span className="fc-info-val" style={{color: ratingColor(rating.overall)}}>{Math.round(rating.overall)}</span>
+              </div>
+              <div className="fc-info-row">
+                <span className="fc-info-label">Players:</span>
+                <span className="fc-info-val">{players.length}</span>
+              </div>
+              <div className="fc-info-row">
+                <span className="fc-info-label">Injured:</span>
+                <span className="fc-info-val" style={{color: injured > 0 ? '#ff3d5a' : '#c8f000'}}>{injured}</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -63,6 +63,25 @@ def get_confederation(team: str) -> str:
     return "OTHER"
 
 
+def row_dict_to_features(row_dict: dict, feature_cols: list, wc_medians: dict) -> list:
+    """
+    Convert a build_match_row result dict into an ordered feature list.
+
+    BUG FIX: previously used `row_dict.get(col, 0) ... else 0` which set any
+    missing or NaN feature to 0.  For EA squad ratings (real range 69–85) that
+    made teams without EA data (e.g. United States) look catastrophically weak,
+    causing impossible upsets in the simulation.  Now falls back to the column
+    median from the WC feature CSV, which keeps missing teams at average strength.
+    """
+    features = []
+    for col in feature_cols:
+        val = row_dict.get(col, None)
+        if val is None or (isinstance(val, float) and math.isnan(val)):
+            val = wc_medians.get(col, 0.0)
+        features.append(float(val))
+    return features
+
+
 # ── Squad rating helpers ───────────────────────────────────────────────────────
 
 def exp_weighted_mean(ratings: list) -> float:
@@ -165,7 +184,8 @@ async def lifespan(app: FastAPI):
 
     print("Pre-computing fixture probabilities...")
     fixture_data, ko_lookup, elo_map = predict_wc.precompute_group_probs(
-        wc, teams_df, om, gh_model, ga_model, feature_cols, elo_map)
+        wc, teams_df, om, gh_model, ga_model, feature_cols, elo_map,
+        ea_df=ea_df, sq_df=sq_df)
 
     app_state["om"]           = om
     app_state["gh_model"]     = gh_model
@@ -177,6 +197,11 @@ async def lifespan(app: FastAPI):
     app_state["elo_map"]      = elo_map
     app_state["fixture_data"] = fixture_data
     app_state["ko_lookup"]    = ko_lookup
+    # Pre-compute column medians from the WC feature CSV.
+    # Used everywhere instead of hard-coding 0 as the NaN fallback — a value of 0
+    # for ea_overall (real range 69–85) made teams like USA look catastrophically
+    # weak and caused upsets like Ivory Coast or USA winning the tournament.
+    app_state["wc_medians"]   = wc[feature_cols].median().to_dict()
 
     # Feature engineering static data for what-if
     print("Loading base features for what-if simulator...")
@@ -244,8 +269,8 @@ def predict_match(req: PredictMatchRequest):
                 app_state["fe_elo_lookup"], app_state["fe_form_df"],
                 app_state["fe_h2h"], app_state["fe_static"]
             )
-            row_features = [row_dict.get(col, 0) if not pd.isna(row_dict.get(col, 0)) else 0
-                            for col in app_state["feature_cols"]]
+            row_features = row_dict_to_features(
+                row_dict, app_state["feature_cols"], app_state["wc_medians"])
             row_np = np.array([row_features], dtype=np.float32)
             
             # Apply altitude to the full row
@@ -330,8 +355,8 @@ def what_if_predict(req: WhatIfRequest):
         app_state["fe_elo_lookup"], app_state["fe_form_df"],
         app_state["fe_h2h"], fe_static_copy
     )
-    row_features = [row_dict.get(col, 0) if not pd.isna(row_dict.get(col, 0)) else 0
-                    for col in app_state["feature_cols"]]
+    row_features = row_dict_to_features(
+        row_dict, app_state["feature_cols"], app_state["wc_medians"])
     row_np = np.array([row_features], dtype=np.float32)
 
     elo_map_copy = app_state["elo_map"].copy()
@@ -516,8 +541,8 @@ def sample_ko_match_detailed(home, away, form_tracker, rng, ea_df):
         row_dict["elo_win_prob_h"] = feature_engineering.win_probability(elo_h + 100, elo_a)
         row_dict["elo_win_prob_a"] = 1.0 - row_dict["elo_win_prob_h"]
 
-    row_features = [row_dict.get(col, 0) if not pd.isna(row_dict.get(col, 0)) else 0
-                    for col in app_state["feature_cols"]]
+    row_features = row_dict_to_features(
+        row_dict, app_state["feature_cols"], app_state["wc_medians"])
     row_np = np.array([row_features], dtype=np.float32)
 
     probs = app_state["om"].predict_proba(row_np)[0]

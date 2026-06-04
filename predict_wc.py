@@ -209,13 +209,25 @@ def apply_host_advantage(row: np.ndarray, feature_cols: list,
 # =============================================================================
 
 def precompute_group_probs(wc, teams_df, om, gh_model, ga_model,
-                           feature_cols, elo_map):
+                           feature_cols, elo_map, ea_df=None, sq_df=None):
     """
     For every group-stage fixture return:
       fixture_data[i] = {group, home, away, city, country,
                          p_H, p_D, p_A, exp_h, exp_a}
     Also builds a knockout feature lookup.
+
+    BUG FIX: replaced fillna(0) with median-based imputation.
+    fillna(0) set ea_overall/ea_attack/etc. to 0 for teams missing EA data
+    (e.g. United States, Czech Republic).  Since the real ea_overall range is
+    69–85, a value of 0 made those teams look catastrophically weak in the
+    group stage even though their Elo is strong.  Median imputation keeps
+    missing-data teams at the average squad quality, so Elo and other features
+    drive the result instead of a nonsensical zero.
     """
+    # Pre-compute per-column medians from the WC feature CSV (numeric cols only)
+    # Use these instead of 0 for any NaN in the feature matrix.
+    wc_medians = wc[feature_cols].median()   # Series indexed by feature name
+
     # Build group fixtures list in canonical order
     fixtures = []
     for group in GROUPS:
@@ -240,16 +252,27 @@ def precompute_group_probs(wc, teams_df, om, gh_model, ga_model,
     for _, h, a, city, country in fixtures:
         m = (wc["home_team"] == h) & (wc["away_team"] == a)
         if m.any():
-            row = wc[m].iloc[0][feature_cols].fillna(0).values.astype(np.float32)
+            # FIX: use median imputation instead of fillna(0)
+            # fillna(0) gave ea_overall=0 to teams like USA (real range 69-85),
+            # making them look weaker than Haiti in the group stage model.
+            raw = wc[m].iloc[0][feature_cols].copy()
+            raw = raw.fillna(wc_medians)   # ← was .fillna(0)
+            row = raw.values.astype(np.float32)
         else:
-            row = np.zeros(len(feature_cols), dtype=np.float32)
-            fc = feature_cols
+            # Fixture not in wc CSV: build a full feature row from team data
             elo_h = elo_map.get(h, 1500)
             elo_a = elo_map.get(a, 1500)
-            if "elo_diff"       in fc: row[fc.index("elo_diff")]       = elo_h - elo_a
-            if "elo_win_prob_h" in fc: row[fc.index("elo_win_prob_h")] = 1/(1+10**((elo_a-elo_h)/400))
-            if "elo_win_prob_a" in fc: row[fc.index("elo_win_prob_a")] = 1-1/(1+10**((elo_a-elo_h)/400))
-            if "t_weight"       in fc: row[fc.index("t_weight")]       = 1.0
+            row = build_full_feature_row(
+                h, a, elo_h, elo_a, feature_cols, teams_df,
+                ea_df if ea_df is not None else pd.DataFrame(),
+                sq_df if sq_df is not None else pd.DataFrame(),
+            )
+            # Fill any remaining NaNs with medians (not zeros)
+            nan_mask = np.isnan(row)
+            if nan_mask.any():
+                for idx_f, fname in enumerate(feature_cols):
+                    if nan_mask[idx_f]:
+                        row[idx_f] = float(wc_medians.get(fname, 0.0))
 
         # Fix 3: host advantage
         row = apply_host_advantage(row, feature_cols, h, a, city, country, elo_map)
@@ -771,7 +794,8 @@ def run(n_sims=10000, seed=42):
     print("Pre-computing fixture probabilities (batch)...")
     t0 = time.time()
     fixture_data, ko_lookup, elo_map = precompute_group_probs(
-        wc, teams_df, om, gh_model, ga_model, feature_cols, elo_map)
+        wc, teams_df, om, gh_model, ga_model, feature_cols, elo_map,
+        ea_df=ea_df, sq_df=sq_df)
     print(f"  Done in {time.time()-t0:.2f}s  ({len(fixture_data)} fixtures)")
 
     # Report host nation and altitude adjustments

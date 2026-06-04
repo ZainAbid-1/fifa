@@ -303,6 +303,13 @@ function AnimatedNumber({ target }) {
 
 export default function LandingPage() {
   const navigate = useNavigate();
+  const [scrollY, setScrollY] = useState(0);
+
+  useEffect(() => {
+    const handleScroll = () => setScrollY(window.scrollY);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   return (
     <main className="landing">
@@ -331,6 +338,7 @@ export default function LandingPage() {
           {/* Left */}
           <div className="hero-left">
             <div className="hero-eyebrow animate-up delay-1">
+              <img src="/wc26-logo.jpg" alt="WC26" style={{ height: '40px', borderRadius: '4px' }} />
               <div className="hero-eyebrow-line" />
               <span className="hero-label">FIFA World Cup 2026</span>
             </div>
@@ -360,8 +368,10 @@ export default function LandingPage() {
           <div className="hero-right animate-fade delay-3" aria-hidden="true">
             <div className="hero-trophy-scene">
               <div className="hero-trophy-glow" />
-              <WorldCupTrophySVG />
-              <span className="hero-trophy-label">FIFA World Cup Trophy</span>
+              <div style={{ transform: `translateY(${scrollY * 0.45}px)`, transition: 'transform 0.05s linear', zIndex: 2, display: 'flex', justifyContent: 'center' }}>
+                <img src="/trophy-new.png" alt="FIFA World Cup Trophy" className="wc-trophy-img" />
+              </div>
+              <span className="hero-trophy-label" style={{ transform: `translateY(${scrollY * 0.2}px)` }}>FIFA World Cup Trophy</span>
             </div>
           </div>
         </div>
