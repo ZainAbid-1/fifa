@@ -174,7 +174,7 @@ export default function MatchPredictor() {
           </div>
           <h1>Match <span>Predictor</span></h1>
           <p className="text-muted center mt-8">
-            AI-powered head-to-head rivalry engine with what-if scenario support
+            Advanced head-to-head rivalry engine with what-if scenario support
           </p>
         </div>
       </div>

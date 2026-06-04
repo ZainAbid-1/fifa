@@ -662,3 +662,114 @@
   .section-header-row { flex-direction: column; align-items: flex-start; }
   .lb-row { grid-template-columns: 36px 1fr 70px 70px 80px 60px; padding: 12px 16px; }
 }
+
+/* ══════════════════════════════════════════════════════════
+   WORLD CUP TROPHY SVG — ANIMATIONS & SCENE
+   ══════════════════════════════════════════════════════════ */
+
+.hero-trophy-scene {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 480px;
+}
+
+.hero-trophy-glow {
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(247,181,0,0.22) 0%, rgba(247,181,0,0.08) 50%, transparent 75%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -55%);
+  animation: glowPulse 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.wc-trophy-svg {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  filter: drop-shadow(0 20px 60px rgba(247,181,0,0.35)) drop-shadow(0 4px 20px rgba(0,0,0,0.5));
+  animation: trophyFloat 4s ease-in-out infinite;
+  position: relative;
+  z-index: 2;
+}
+
+.hero-trophy-label {
+  font-family: var(--font-sub);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.35);
+  margin-top: 16px;
+  position: relative;
+  z-index: 2;
+}
+
+/* Trophy float animation */
+@keyframes trophyFloat {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-14px); }
+}
+
+/* Glow pulse */
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.7; transform: translate(-50%, -55%) scale(1); }
+  50%       { opacity: 1;   transform: translate(-50%, -55%) scale(1.12); }
+}
+
+/* Trophy shadow sync with float */
+.trophy-shadow {
+  animation: shadowPulse 4s ease-in-out infinite;
+  transform-origin: center;
+}
+@keyframes shadowPulse {
+  0%, 100% { opacity: 0.3; rx: 80; }
+  50%       { opacity: 0.12; rx: 65; }
+}
+
+/* Floating particles */
+.particle {
+  animation: particleDrift 6s ease-in-out infinite;
+}
+.p1 { animation-delay: 0s;    animation-duration: 5.5s; }
+.p2 { animation-delay: -1.5s; animation-duration: 6.5s; }
+.p3 { animation-delay: -3s;   animation-duration: 7s; }
+.p4 { animation-delay: -0.8s; animation-duration: 5s; }
+.p5 { animation-delay: -2.5s; animation-duration: 8s; }
+.p6 { animation-delay: -4s;   animation-duration: 6s; }
+.p7 { animation-delay: -1s;   animation-duration: 7.5s; }
+.p8 { animation-delay: -3.5s; animation-duration: 5.8s; }
+
+@keyframes particleDrift {
+  0%, 100% { transform: translateY(0) translateX(0) scale(1); opacity: 0.6; }
+  33%       { transform: translateY(-12px) translateX(5px) scale(1.2); opacity: 0.9; }
+  66%       { transform: translateY(-6px) translateX(-4px) scale(0.9); opacity: 0.5; }
+}
+
+/* Sparkle animations */
+.sparkle {
+  animation: sparkleAnim 3s ease-in-out infinite;
+  transform-origin: center;
+}
+.s1 { animation-delay: 0s; }
+.s2 { animation-delay: -1s; animation-duration: 2.5s; }
+.s3 { animation-delay: -2s; animation-duration: 3.5s; }
+.s4 { animation-delay: -0.5s; animation-duration: 4s; }
+
+@keyframes sparkleAnim {
+  0%, 100% { opacity: 0.2; transform: scale(0.6) rotate(0deg); }
+  50%       { opacity: 1;   transform: scale(1.2) rotate(45deg); }
+}
+
+/* Remove old trophy ring styles if any */
+.hero-big-number { display: none; }
+.hero-trophy-area { display: none; }
+.hero-trophy-ring { display: none; }

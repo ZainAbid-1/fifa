@@ -160,7 +160,7 @@ app_state = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Loading models and data for API...")
-    om, gh_model, ga_model, feature_cols, wc, teams_df, ea_df = predict_wc.load_all()
+    om, gh_model, ga_model, feature_cols, wc, teams_df, ea_df, sq_df = predict_wc.load_all()
     elo_map = dict(zip(teams_df["team"], teams_df["elo_rating"]))
 
     print("Pre-computing fixture probabilities...")

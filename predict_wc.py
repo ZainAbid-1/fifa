@@ -111,8 +111,11 @@ def load_all():
     wc       = pd.read_csv(OUT_DIR / "wc2026_features.csv")
     teams_df = pd.read_csv(DATA_DIR / "teams_2026.csv")
     ea_df    = pd.read_csv(DATA_DIR / "squad_team_ratings.csv")
+    sq_df    = pd.read_csv(DATA_DIR / "squad_values.csv").rename(
+                   columns={"total_market_value_euros_millions": "squad_value_m"})
+    sq_df["log_squad_value"] = np.log1p(sq_df["squad_value_m"])
 
-    return om, gh, ga, feature_cols, wc, teams_df, ea_df
+    return om, gh, ga, feature_cols, wc, teams_df, ea_df, sq_df
 
 
 # =============================================================================
@@ -280,12 +283,116 @@ def precompute_group_probs(wc, teams_df, om, gh_model, ga_model,
     return fixture_data, ko_lookup, elo_map
 
 
+def _set(row, fc, name, val):
+    """Helper: set a feature by name if it exists in the feature list."""
+    if name in fc:
+        row[fc.index(name)] = val
+
+
+def build_full_feature_row(home, away, elo_h, elo_a, feature_cols,
+                            teams_df, ea_df, sq_df):
+    """
+    Build a complete feature row for a match, filling ALL features the model
+    was trained on — not just ELO.  Leaving non-ELO features as zero causes
+    the model to misinterpret them (e.g. world_ranking=0 looks better than
+    rank 1; ea_overall=0 looks like a terrible squad) which is the root cause
+    of impossible results like Haiti or Iran winning the tournament.
+    """
+    fc  = feature_cols
+    row = np.zeros(len(fc), dtype=np.float32)
+
+    # ── ELO features ──────────────────────────────────────────────────────────
+    _set(row, fc, "t_weight",       1.0)
+    _set(row, fc, "elo_diff",       elo_h - elo_a)
+    p_h = 1 / (1 + 10 ** ((elo_a - elo_h) / 400))
+    _set(row, fc, "elo_win_prob_h", p_h)
+    _set(row, fc, "elo_win_prob_a", 1 - p_h)
+
+    # ── Per-team static features ───────────────────────────────────────────────
+    h_row = teams_df[teams_df["team"] == home]
+    a_row = teams_df[teams_df["team"] == away]
+
+    if not h_row.empty:
+        h = h_row.iloc[0]
+        _set(row, fc, "h_world_ranking",  h["world_ranking"])
+        _set(row, fc, "h_participations", h["participations"])
+        _set(row, fc, "h_elo_rating",     h["elo_rating"])
+        _set(row, fc, "h_elo_rank_wc",    h["elo_rank_wc"])
+        _set(row, fc, "h_rank_score",     1.0 / max(h["world_ranking"], 1))
+        _set(row, fc, "h_wc_exp",         np.log1p(h["participations"]))
+
+    if not a_row.empty:
+        a = a_row.iloc[0]
+        _set(row, fc, "a_world_ranking",  a["world_ranking"])
+        _set(row, fc, "a_participations", a["participations"])
+        _set(row, fc, "a_elo_rating",     a["elo_rating"])
+        _set(row, fc, "a_elo_rank_wc",    a["elo_rank_wc"])
+        _set(row, fc, "a_rank_score",     1.0 / max(a["world_ranking"], 1))
+        _set(row, fc, "a_wc_exp",         np.log1p(a["participations"]))
+
+    if not h_row.empty and not a_row.empty:
+        _set(row, fc, "diff_rank_score",
+             1.0 / max(h["world_ranking"], 1) - 1.0 / max(a["world_ranking"], 1))
+        _set(row, fc, "diff_wc_exp",
+             np.log1p(h["participations"]) - np.log1p(a["participations"]))
+
+    # ── EA squad ratings ───────────────────────────────────────────────────────
+    h_ea = ea_df[ea_df["team"] == home]
+    a_ea = ea_df[ea_df["team"] == away]
+
+    if not h_ea.empty:
+        he = h_ea.iloc[0]
+        _set(row, fc, "h_ea_overall",       he["overall"])
+        _set(row, fc, "h_ea_attack",        he["attack"])
+        _set(row, fc, "h_ea_midfield",      he["midfield"])
+        _set(row, fc, "h_ea_defense",       he["defense"])
+        _set(row, fc, "h_ea_atk_def_ratio", he["attack"] / max(he["defense"], 1))
+        _set(row, fc, "h_ea_balance",
+             he["overall"] - (he["attack"] + he["defense"]) / 2)
+
+    if not a_ea.empty:
+        ae = a_ea.iloc[0]
+        _set(row, fc, "a_ea_overall",       ae["overall"])
+        _set(row, fc, "a_ea_attack",        ae["attack"])
+        _set(row, fc, "a_ea_midfield",      ae["midfield"])
+        _set(row, fc, "a_ea_defense",       ae["defense"])
+        _set(row, fc, "a_ea_atk_def_ratio", ae["attack"] / max(ae["defense"], 1))
+        _set(row, fc, "a_ea_balance",
+             ae["overall"] - (ae["attack"] + ae["defense"]) / 2)
+
+    if not h_ea.empty and not a_ea.empty:
+        he, ae = h_ea.iloc[0], a_ea.iloc[0]
+        _set(row, fc, "diff_ea_overall",  he["overall"]  - ae["overall"])
+        _set(row, fc, "diff_ea_attack",   he["attack"]   - ae["attack"])
+        _set(row, fc, "diff_ea_midfield", he["midfield"] - ae["midfield"])
+        _set(row, fc, "diff_ea_defense",  he["defense"]  - ae["defense"])
+
+    # ── Squad market values ────────────────────────────────────────────────────
+    if sq_df is not None:
+        h_sq = sq_df[sq_df["team"] == home]
+        a_sq = sq_df[sq_df["team"] == away]
+        if not h_sq.empty:
+            _set(row, fc, "h_squad_value_m",   h_sq.iloc[0]["squad_value_m"])
+            _set(row, fc, "h_log_squad_value",  h_sq.iloc[0]["log_squad_value"])
+        if not a_sq.empty:
+            _set(row, fc, "a_squad_value_m",   a_sq.iloc[0]["squad_value_m"])
+            _set(row, fc, "a_log_squad_value",  a_sq.iloc[0]["log_squad_value"])
+        if not h_sq.empty and not a_sq.empty:
+            _set(row, fc, "diff_squad_value_m",
+                 h_sq.iloc[0]["squad_value_m"] - a_sq.iloc[0]["squad_value_m"])
+
+    return row
+
+
 def make_ko_features(home, away, elo_map, om, gh_model, ga_model,
                      feature_cols, ko_lookup, wc, teams_df,
-                     form_tracker=None):
+                     form_tracker=None, ea_df=None, sq_df=None):
     """
     Get or compute knockout fixture prediction data.
     Fix 1: If form_tracker provided, apply a momentum boost to elo_diff.
+    Fix 8 (BUG FIX): Fill ALL team features, not just ELO — zeroing out
+      features like world_ranking, ea_overall, squad_value fed nonsense
+      signals to the model and caused upsets by weak teams.
     """
     if (home, away) in ko_lookup and form_tracker is None:
         return ko_lookup[(home, away)]
@@ -298,14 +405,15 @@ def make_ko_features(home, away, elo_map, om, gh_model, ga_model,
         elo_h += form_tracker.momentum_bonus(home)
         elo_a += form_tracker.momentum_bonus(away)
 
-    row = np.zeros((1, len(feature_cols)), dtype=np.float32)
+    # Fix 8: build a complete feature row (all static team features populated)
+    row = build_full_feature_row(home, away, elo_h, elo_a,
+                                  feature_cols, teams_df,
+                                  ea_df if ea_df is not None else pd.DataFrame(),
+                                  sq_df)
+    row = row.reshape(1, -1)
     fc  = feature_cols
-    if "elo_diff"       in fc: row[0, fc.index("elo_diff")]       = elo_h - elo_a
-    if "elo_win_prob_h" in fc: row[0, fc.index("elo_win_prob_h")] = 1/(1+10**((elo_a-elo_h)/400))
-    if "elo_win_prob_a" in fc: row[0, fc.index("elo_win_prob_a")] = 1 - 1/(1+10**((elo_a-elo_h)/400))
-    if "t_weight"       in fc: row[0, fc.index("t_weight")]       = 1.0
 
-    # Fix 1: also override rolling-form differentials if tracker available
+    # Fix 1: override rolling-form differentials with in-tournament stats
     if form_tracker is not None:
         hf = form_tracker.get(home)
         af = form_tracker.get(away)
@@ -315,6 +423,18 @@ def make_ko_features(home, away, elo_map, om, gh_model, ga_model,
             row[0, fc.index("diff_gf5")]   = hf["gf_avg"]  - af["gf_avg"]
         if "diff_ga5" in fc:
             row[0, fc.index("diff_ga5")]   = hf["ga_avg"]  - af["ga_avg"]
+        if "h_gf5" in fc:
+            row[0, fc.index("h_gf5")]  = hf["gf_avg"]
+        if "h_ga5" in fc:
+            row[0, fc.index("h_ga5")]  = hf["ga_avg"]
+        if "h_pts5" in fc:
+            row[0, fc.index("h_pts5")] = hf["pts_avg"]
+        if "a_gf5" in fc:
+            row[0, fc.index("a_gf5")]  = af["gf_avg"]
+        if "a_ga5" in fc:
+            row[0, fc.index("a_ga5")]  = af["ga_avg"]
+        if "a_pts5" in fc:
+            row[0, fc.index("a_pts5")] = af["pts_avg"]
 
     probs = om.predict_proba(row)[0]
     fd = {
@@ -464,15 +584,17 @@ def sample_extra_time(fd, rng):
 
 def sample_ko_match(home, away, elo_map, ko_lookup, om, gh_model, ga_model,
                     feature_cols, wc, teams_df, rng,
-                    form_tracker=None, ea_df=None):
+                    form_tracker=None, ea_df=None, sq_df=None):
     """
     Simulate a knockout match with:
       Fix 1: momentum-adjusted KO features
       Fix 4: Extra Time if drawn after 90 min
       Fix 5: Richer penalty model
+      Fix 8: Full feature row (no more zero-padded rankings/ratings)
     """
     fd = make_ko_features(home, away, elo_map, om, gh_model, ga_model,
-                          feature_cols, ko_lookup, wc, teams_df, form_tracker)
+                          feature_cols, ko_lookup, wc, teams_df, form_tracker,
+                          ea_df=ea_df, sq_df=sq_df)
     gh, ga = sample_match(fd, rng)
 
     if gh == ga:
@@ -497,7 +619,7 @@ def sample_ko_match(home, away, elo_map, ko_lookup, om, gh_model, ga_model,
 
 def simulate_one(fixture_data, ko_lookup, elo_map, teams_df,
                  om, gh_model, ga_model, feature_cols, wc, rng,
-                 ea_df=None):
+                 ea_df=None, sq_df=None):
 
     results = {}
 
@@ -578,7 +700,7 @@ def simulate_one(fixture_data, ko_lookup, elo_map, teams_df,
     for h, a in r32_pairs:
         w = sample_ko_match(h, a, elo_map, ko_lookup, om, gh_model, ga_model,
                             feature_cols, wc, teams_df, rng,
-                            form_tracker=form_tracker, ea_df=ea_df)
+                            form_tracker=form_tracker, ea_df=ea_df, sq_df=sq_df)
         r32_winners.append(w)
     for t in r32_field:
         if t not in r32_winners:
@@ -590,7 +712,7 @@ def simulate_one(fixture_data, ko_lookup, elo_map, teams_df,
     for h, a in r16_pairs:
         w = sample_ko_match(h, a, elo_map, ko_lookup, om, gh_model, ga_model,
                             feature_cols, wc, teams_df, rng,
-                            form_tracker=form_tracker, ea_df=ea_df)
+                            form_tracker=form_tracker, ea_df=ea_df, sq_df=sq_df)
         r16_winners.append(w)
     for t in r32_winners:
         if t not in r16_winners:
@@ -602,7 +724,7 @@ def simulate_one(fixture_data, ko_lookup, elo_map, teams_df,
     for h, a in qf_pairs:
         w = sample_ko_match(h, a, elo_map, ko_lookup, om, gh_model, ga_model,
                             feature_cols, wc, teams_df, rng,
-                            form_tracker=form_tracker, ea_df=ea_df)
+                            form_tracker=form_tracker, ea_df=ea_df, sq_df=sq_df)
         qf_winners.append(w)
     for t in r16_winners:
         if t not in qf_winners:
@@ -614,7 +736,7 @@ def simulate_one(fixture_data, ko_lookup, elo_map, teams_df,
     for h, a in sf_pairs:
         w = sample_ko_match(h, a, elo_map, ko_lookup, om, gh_model, ga_model,
                             feature_cols, wc, teams_df, rng,
-                            form_tracker=form_tracker, ea_df=ea_df)
+                            form_tracker=form_tracker, ea_df=ea_df, sq_df=sq_df)
         sf_winners.append(w)
     for t in qf_winners:
         if t not in sf_winners:
@@ -624,7 +746,7 @@ def simulate_one(fixture_data, ko_lookup, elo_map, teams_df,
     f1, f2 = sf_winners[0], sf_winners[1]
     champion = sample_ko_match(f1, f2, elo_map, ko_lookup, om, gh_model, ga_model,
                                feature_cols, wc, teams_df, rng,
-                               form_tracker=form_tracker, ea_df=ea_df)
+                               form_tracker=form_tracker, ea_df=ea_df, sq_df=sq_df)
     runner_up = f2 if champion == f1 else f1
     results[runner_up] = "final"
     results[champion]  = "winner"
@@ -638,11 +760,11 @@ def simulate_one(fixture_data, ko_lookup, elo_map, teams_df,
 
 def run(n_sims=10000, seed=42):
     print("Loading models & data...")
-    om, gh_model, ga_model, feature_cols, wc, teams_df, ea_df = load_all()
+    om, gh_model, ga_model, feature_cols, wc, teams_df, ea_df, sq_df = load_all()
     print(f"  48 teams · 12 groups · 72 group-stage fixtures")
     print(f"  Enhancements active: [1] Dynamic Form  [3] Host Advantage  "
           f"[4] Extra Time  [5] Richer Penalties  [6] Accurate 3rd-Place  "
-          f"[7] Altitude/Fatigue")
+          f"[7] Altitude/Fatigue  [8] Full KO Features")
 
     elo_map = dict(zip(teams_df["team"], teams_df["elo_rating"]))
 
@@ -683,7 +805,7 @@ def run(n_sims=10000, seed=42):
         rng = np.random.default_rng(int(s))
         res = simulate_one(fixture_data, ko_lookup, elo_map, teams_df,
                            om, gh_model, ga_model, feature_cols, wc, rng,
-                           ea_df=ea_df)
+                           ea_df=ea_df, sq_df=sq_df)
         for team, stage in res.items():
             counts[team][stage] += 1
 
