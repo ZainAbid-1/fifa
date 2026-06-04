@@ -337,11 +337,6 @@ export default function LandingPage() {
         <div className="container hero-content">
           {/* Left */}
           <div className="hero-left">
-            <div className="hero-eyebrow animate-up delay-1">
-              <img src="/wc26-logo.jpg" alt="WC26" style={{ height: '40px', borderRadius: '4px' }} />
-              <div className="hero-eyebrow-line" />
-              <span className="hero-label">FIFA World Cup 2026</span>
-            </div>
 
             <h1 className="hero-headline">
               <span className="hero-headline-line1 animate-left delay-2">Predict.</span>

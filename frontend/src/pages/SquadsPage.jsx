@@ -24,7 +24,7 @@ const FLAG_MAP = {
   "Morocco": "ma", "Senegal": "sn", "Algeria": "dz", "Egypt": "eg", "Ghana": "gh", 
   "Ivory Coast": "ci", "Cameroon": "cm", "Tunisia": "tn", "Nigeria": "ng", "South Africa": "za", 
   "DR Congo": "cd", "Cape Verde": "cv",
-  "United States": "us", "Mexico": "mx", "Canada": "ca", "Jamaica": "jm", "Honduras": "hn", 
+  "United States": "us", "USA": "us", "Mexico": "mx", "Canada": "ca", "Jamaica": "jm", "Honduras": "hn",
   "El Salvador": "sv", "Costa Rica": "cr", "Haiti": "ht", "Panama": "pa", "Trinidad and Tobago": "tt", "Curacao": "cw",
   "Japan": "jp", "South Korea": "kr", "Iran": "ir", "Saudi Arabia": "sa", "Australia": "au", 
   "Qatar": "qa", "Iraq": "iq", "Jordan": "jo", "Uzbekistan": "uz", "New Zealand": "nz",
@@ -366,20 +366,22 @@ export default function SquadsPage() {
 
       {/* Controls */}
       <div className="container">
-        <div className="squads-controls animate-up">
-          <input
-            id="squad-search"
-            className="input squads-search"
-            type="text"
-            placeholder="Search nation..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          <div className="conf-chips">
+        <div className="fc-controls-wrap animate-up">
+          <div className="fc-search-wrap">
+            <input
+              id="squad-search"
+              className="fc-input"
+              type="text"
+              placeholder="Search nation..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="fc-chips-wrap">
             {CONFEDERATIONS.map(c => (
               <button
                 key={c}
-                className={`chip ${confFilter === c ? 'active' : ''}`}
+                className={`fc-chip ${confFilter === c ? 'active' : ''}`}
                 onClick={() => setConfFilter(c)}
               >
                 {c}
@@ -387,7 +389,7 @@ export default function SquadsPage() {
             ))}
           </div>
           <select 
-            className="input squads-search" 
+            className="fc-select" 
             style={{ width: 'auto', minWidth: '150px' }} 
             value={sortBy} 
             onChange={e => setSortBy(e.target.value)}
@@ -397,7 +399,7 @@ export default function SquadsPage() {
             <option value="midfield">Sort: Midfield</option>
             <option value="defense">Sort: Defense</option>
           </select>
-          <span className="label text-muted" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+          <span className="fc-teams-count">
             {filtered.length} teams
           </span>
         </div>
