@@ -975,3 +975,122 @@ def simulate_stage():
         "stage_completed": stage,
         "next_stage": single_tournament["stage"]
     }
+
+
+# =============================================================================
+# BATCH SIMULATION ENDPOINTS
+# =============================================================================
+
+@app.get("/api/group_fixtures")
+def get_group_fixtures():
+    """Return all 72 group-stage fixtures with group, date, and city metadata."""
+    if "fixture_data" not in app_state:
+        raise HTTPException(status_code=503, detail="API not ready.")
+    wc = app_state["wc"]
+    result = []
+    for fd in app_state["fixture_data"]:
+        mask = (wc["home_team"] == fd["home"]) & (wc["away_team"] == fd["away"])
+        date_val = ""
+        if mask.any():
+            row = wc[mask].iloc[0]
+            if "date" in wc.columns:
+                date_val = str(row["date"])
+        result.append({
+            "home":    fd["home"],
+            "away":    fd["away"],
+            "group":   fd["group"],
+            "date":    date_val,
+            "city":    fd.get("city", ""),
+            "country": fd.get("country", ""),
+        })
+    return {"fixtures": result}
+
+
+class BatchMatchItem(BaseModel):
+    home:  str
+    away:  str
+    venue: Optional[str] = ""
+
+
+class BatchSimRequest(BaseModel):
+    matches: List[BatchMatchItem]
+    n_sims:  int = 5000
+
+
+@app.post("/api/simulate_batch")
+def simulate_batch(req: BatchSimRequest):
+    """
+    Run N Monte Carlo simulations for each match in the batch.
+    Returns per-match aggregated stats: win%, avg goals, top score distribution.
+    """
+    if "om" not in app_state:
+        raise HTTPException(status_code=503, detail="API not ready.")
+
+    n_sims   = int(np.clip(req.n_sims, 100, 20000))
+    rng      = np.random.default_rng(int(time.time() * 1000) % (2 ** 31))
+    ko_lookup = app_state["ko_lookup"]
+    results  = []
+
+    for match in req.matches:
+        home  = match.home
+        away  = match.away
+        venue = match.venue or ""
+        if not home or not away or home == away:
+            continue
+
+        # ── Probability data ──────────────────────────────────────────────────
+        fd = ko_lookup.get((home, away))
+        if not fd:
+            try:
+                row_dict = feature_engineering.build_match_row(
+                    home, away, "2026-06-11", True, "FIFA World Cup",
+                    app_state["fe_elo_lookup"], app_state["fe_form_df"],
+                    app_state["fe_h2h"], app_state["fe_static"])
+                row_features = row_dict_to_features(
+                    row_dict, app_state["feature_cols"], app_state["wc_medians"])
+                row_np = np.array([row_features], dtype=np.float32)
+                if venue:
+                    row_np[0] = predict_wc.apply_altitude_to_row(
+                        row_np[0], app_state["feature_cols"],
+                        venue, home, away, app_state["elo_map"])
+                probs = app_state["om"].predict_proba(row_np)[0]
+                exp_h = float(np.clip(app_state["gh_model"].predict(row_np)[0], 0.3, 8))
+                exp_a = float(np.clip(app_state["ga_model"].predict(row_np)[0], 0.3, 8))
+                fd = {"p_H": probs[2], "p_D": probs[1], "p_A": probs[0],
+                      "exp_h": exp_h, "exp_a": exp_a}
+            except Exception:
+                fd = {"p_H": 0.40, "p_D": 0.25, "p_A": 0.35, "exp_h": 1.3, "exp_a": 1.1}
+
+        # ── Monte Carlo loop ──────────────────────────────────────────────────
+        hw = aw = dr = gh_sum = ga_sum = 0
+        score_counts: dict = {}
+        for _ in range(n_sims):
+            gh, ga = predict_wc.sample_match(fd, rng)
+            gh_sum += gh; ga_sum += ga
+            k = f"{gh}-{ga}"
+            score_counts[k] = score_counts.get(k, 0) + 1
+            if gh > ga:   hw += 1
+            elif ga > gh: aw += 1
+            else:         dr += 1
+
+        top = sorted(
+            [{"score": k, "pct": round(v / n_sims, 4)} for k, v in score_counts.items()],
+            key=lambda x: -x["pct"]
+        )[:8]
+
+        results.append({
+            "home":             home,
+            "away":             away,
+            "win_pct_home":     round(hw      / n_sims, 4),
+            "draw_pct":         round(dr      / n_sims, 4),
+            "win_pct_away":     round(aw      / n_sims, 4),
+            "avg_goals_home":   round(gh_sum  / n_sims, 2),
+            "avg_goals_away":   round(ga_sum  / n_sims, 2),
+            "most_common_score": top[0]["score"] if top else "1-1",
+            "top_scores":       top,
+            "predicted_winner": (home if hw > aw else (away if aw > hw else "Draw")),
+            "n_sims":           n_sims,
+        })
+
+    return {"results": results}
+

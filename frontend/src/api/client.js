@@ -46,3 +46,7 @@ export const simulateStage      = () => request('POST', '/api/tournament/simulat
 export const runSimulation    = (n = 1000) => request('POST', '/api/run_simulation', { n });
 export const stopSimulation   = ()         => request('POST', '/api/stop_simulation');
 export const getSimStatus     = ()         => request('GET',  '/api/simulation_status');
+
+// ── Batch simulation ─────────────────────────────────────────
+export const getGroupFixtures   = ()              => request('GET',  '/api/group_fixtures');
+export const simulateBatch      = (matches, n=5000) => request('POST', '/api/simulate_batch', { matches, n_sims: n });
