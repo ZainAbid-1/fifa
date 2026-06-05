@@ -1,37 +1,36 @@
 import { useEffect, useState, useMemo } from 'react';
-import { getSquads, injurePlayer, restorePlayer } from '../api/client';
+import { getSquads } from '../api/client';
 import './SquadsPage.css';
 
 const CONFEDERATIONS = ['All', 'UEFA', 'CONMEBOL', 'CAF', 'CONCACAF', 'AFC'];
 
 const CONF_COLOR = {
-  UEFA:     '#1a7bff',
+  UEFA: '#1a7bff',
   CONMEBOL: '#e5001b',
-  CAF:      '#f7b500',
+  CAF: '#f7b500',
   CONCACAF: '#c8f000',
-  AFC:      '#ff5500',
-  OFC:      '#8b5cf6',
-  OTHER:    '#5a6a85',
+  AFC: '#ff5500',
+  OFC: '#8b5cf6',
+  OTHER: '#5a6a85',
 };
 
 const FLAG_MAP = {
-  "France": "fr", "Germany": "de", "Spain": "es", "England": "gb-eng", "Portugal": "pt", 
-  "Netherlands": "nl", "Belgium": "be", "Croatia": "hr", "Austria": "at", "Czechia": "cz", 
-  "Serbia": "rs", "Switzerland": "ch", "Denmark": "dk", "Sweden": "se", "Norway": "no", 
+  "France": "fr", "Germany": "de", "Spain": "es", "England": "gb-eng", "Portugal": "pt",
+  "Netherlands": "nl", "Belgium": "be", "Croatia": "hr", "Austria": "at", "Czechia": "cz",
+  "Serbia": "rs", "Switzerland": "ch", "Denmark": "dk", "Sweden": "se", "Norway": "no",
   "Turkey": "tr", "Scotland": "gb-sct", "Ukraine": "ua", "Bosnia-Herzegovina": "ba", "Slovakia": "sk",
-  "Brazil": "br", "Argentina": "ar", "Colombia": "co", "Uruguay": "uy", "Ecuador": "ec", 
+  "Brazil": "br", "Argentina": "ar", "Colombia": "co", "Uruguay": "uy", "Ecuador": "ec",
   "Chile": "cl", "Paraguay": "py", "Bolivia": "bo", "Venezuela": "ve", "Peru": "pe",
-  "Morocco": "ma", "Senegal": "sn", "Algeria": "dz", "Egypt": "eg", "Ghana": "gh", 
-  "Ivory Coast": "ci", "Cameroon": "cm", "Tunisia": "tn", "Nigeria": "ng", "South Africa": "za", 
+  "Morocco": "ma", "Senegal": "sn", "Algeria": "dz", "Egypt": "eg", "Ghana": "gh",
+  "Ivory Coast": "ci", "Cameroon": "cm", "Tunisia": "tn", "Nigeria": "ng", "South Africa": "za",
   "DR Congo": "cd", "Cape Verde": "cv",
   "United States": "us", "USA": "us", "Mexico": "mx", "Canada": "ca", "Jamaica": "jm", "Honduras": "hn",
-  "El Salvador": "sv", "Costa Rica": "cr", "Haiti": "ht", "Panama": "pa", "Trinidad and Tobago": "tt", "Curacao": "cw",
-  "Japan": "jp", "South Korea": "kr", "Iran": "ir", "Saudi Arabia": "sa", "Australia": "au", 
+  "El Salvador": "sv", "Costa Rica": "cr", "Haiti": "ht", "Panama": "pa",
+  "Trinidad and Tobago": "tt", "Curacao": "cw",
+  "Japan": "jp", "South Korea": "kr", "Iran": "ir", "Saudi Arabia": "sa", "Australia": "au",
   "Qatar": "qa", "Iraq": "iq", "Jordan": "jo", "Uzbekistan": "uz", "New Zealand": "nz",
   "Italy": "it", "Wales": "gb-wls", "Mali": "ml"
 };
-
-const POS_ORDER = { GK: 0, DEF: 1, MID: 2, FWD: 3 };
 
 function ratingColor(r) {
   if (r >= 85) return '#c8f000';
@@ -40,155 +39,154 @@ function ratingColor(r) {
   return '#5a6a85';
 }
 
-function PitchView({ players, team, onToggleInjury, updating }) {
-  const byPos = { GK: [], DEF: [], MID: [], FWD: [] };
-  players.forEach(p => {
-    const pos = p.position === 'GK' ? 'GK' : p.position;
-    if (byPos[pos]) byPos[pos].push(p);
-    else byPos.FWD.push(p);
-  });
-
-  const starters = [
-    ...byPos.GK.slice(0, 1),
-    ...byPos.DEF.slice(0, 4),
-    ...byPos.MID.slice(0, 3),
-    ...byPos.FWD.slice(0, 3),
-  ];
-  const bench = players.filter(p => !starters.includes(p));
-
-  const rows = [
-    { label: 'FWD', players: starters.filter(p => p.position === 'FWD') },
-    { label: 'MID', players: starters.filter(p => p.position === 'MID') },
-    { label: 'DEF', players: starters.filter(p => p.position === 'DEF') },
-    { label: 'GK',  players: starters.filter(p => p.position === 'GK')  },
-  ];
-
+/* ─── Player Row ─────────────────────────────────────────── */
+function PlayerRow({ player }) {
   return (
-    <div className="pitch-wrap">
-      <div className="pitch">
-        <div className="pitch-markings" aria-hidden="true">
-          <div className="pitch-center-circle" />
-          <div className="pitch-center-line" />
-          <div className="pitch-penalty-top" />
-          <div className="pitch-penalty-bot" />
-        </div>
-
-        <div className="pitch-field">
-          {rows.map(({ label, players: rowPlayers }) => (
-            <div key={label} className="pitch-row">
-              {rowPlayers.map(p => (
-                <PitchPlayer
-                  key={p.name}
-                  player={p}
-                  onToggle={() => onToggleInjury(team, p)}
-                  busy={updating === p.name}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {bench.length > 0 && (
-        <div className="bench-section">
-          <p className="label text-muted mb-8">Bench ({bench.length})</p>
-          <div className="bench-list">
-            {bench.map(p => (
-              <BenchPlayer
-                key={p.name}
-                player={p}
-                onToggle={() => onToggleInjury(team, p)}
-                busy={updating === p.name}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+    <div className="dossier-player-row">
+      <span className="dossier-player-name">{player.name}</span>
+      <span className="dossier-player-overall">{player.overall}</span>
     </div>
   );
 }
 
-function PitchPlayer({ player, onToggle, busy }) {
-  const rc = ratingColor(player.overall);
+/* ─── Position Column ────────────────────────────────────── */
+function PositionColumn({ title, players, accentColor }) {
+  return (
+    <div className="dossier-column">
+      <div className="dossier-column-header">
+        <span className="dossier-column-title" style={{ color: accentColor || 'var(--lime)' }}>
+          {title}
+        </span>
+        <div className="dossier-column-divider" style={{ background: accentColor || 'var(--lime)' }} />
+      </div>
+      <div className="dossier-column-list">
+        {players.length > 0
+          ? players.map(p => <PlayerRow key={p.name} player={p} />)
+          : <span className="dossier-empty">—</span>
+        }
+      </div>
+    </div>
+  );
+}
+
+/* ─── Team Modal (Dossier) ───────────────────────────────── */
+function TeamModal({ teamData, onClose }) {
+  const { team, confederation, rating, players } = teamData;
+  const confColor = CONF_COLOR[confederation] || CONF_COLOR.OTHER;
+  const code = FLAG_MAP[team] || 'un';
+
+  const { gks, defs, mids, fwds } = useMemo(() => ({
+    gks: players.filter(p => p.position === 'GK'),
+    defs: players.filter(p => p.position === 'DEF'),
+    mids: players.filter(p => p.position === 'MID'),
+    fwds: players.filter(p => p.position === 'FWD'),
+  }), [players]);
+
   return (
     <div
-      className={`pitch-player ${player.injured ? 'pitch-player--injured' : ''}`}
-      title={`${player.name} — Click to ${player.injured ? 'restore' : 'injure'}`}
+      className="dossier-overlay animate-in"
+      onClick={e => e.target === e.currentTarget && onClose()}
     >
-      <div className="pitch-player-avatar" style={{ borderColor: rc }}>
-        <span className="pitch-player-pos">{player.position}</span>
-        {player.injured && <div className="pitch-player-injury-overlay">INJ</div>}
+      <div className="dossier-box animate-up">
+
+        {/* ── Header ─────────────────────────────────────── */}
+        <div className="dossier-header">
+          <div className="dossier-header-identity">
+            <div className="dossier-flag-wrap">
+              {code === 'un' ? (
+                <div
+                  className="dossier-flag-fallback"
+                  style={{ background: confColor + '20', color: confColor }}
+                >
+                  {team.slice(0, 2).toUpperCase()}
+                </div>
+              ) : (
+                <img
+                  src={`https://flagcdn.com/w320/${code}.png`}
+                  alt={team}
+                  className="dossier-flag"
+                />
+              )}
+            </div>
+            <div className="dossier-header-text">
+              <span
+                className="dossier-conf-badge"
+                style={{ color: confColor, borderColor: confColor + '50' }}
+              >
+                {confederation}
+              </span>
+              <h2 className="dossier-team-name">{team}</h2>
+            </div>
+          </div>
+
+          <div className="dossier-ratings">
+            <div className="dossier-rating-block">
+              <span className="dossier-rating-val" style={{ color: '#d60d0dff' }}>{Math.round(rating.attack)}</span>
+              <span className="dossier-rating-label">ATT</span>
+            </div>
+            <div className="dossier-rating-sep" />
+            <div className="dossier-rating-block">
+              <span className="dossier-rating-val" style={{ color: '#00d4ff' }}>{Math.round(rating.midfield)}</span>
+              <span className="dossier-rating-label">MID</span>
+            </div>
+            <div className="dossier-rating-sep" />
+            <div className="dossier-rating-block">
+              <span className="dossier-rating-val" style={{ color: '#4ade80' }}>{Math.round(rating.defense)}</span>
+              <span className="dossier-rating-label">DEF</span>
+            </div>
+            <div className="dossier-rating-sep" />
+            <div className="dossier-rating-block">
+              <span
+                className="dossier-rating-val"
+                style={{ color: ratingColor(rating.overall) }}
+              >
+                {Math.round(rating.overall)}
+              </span>
+              <span className="dossier-rating-label">OVR</span>
+            </div>
+          </div>
+
+          <button className="dossier-close" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        {/* ── Four-Column Grid ────────────────────────────── */}
+        <div className="dossier-body">
+          <div className="dossier-grid">
+            <PositionColumn title="GOALKEEPERS" players={gks} accentColor="#f7b500" />
+            <PositionColumn title="DEFENDERS" players={defs} accentColor="#1a7bff" />
+            <PositionColumn title="MIDFIELDERS" players={mids} accentColor="#c8f000" />
+            <PositionColumn title="ATTACKERS" players={fwds} accentColor="#ff5500" />
+          </div>
+        </div>
       </div>
-      <div className="pitch-player-info">
-        <span className="pitch-player-name">{player.name.split(' ').pop()}</span>
-        <span className="pitch-player-rating" style={{ color: rc }}>{player.overall}</span>
-      </div>
-      <button
-        className={`pitch-player-action ${player.injured ? 'restore' : 'injure'}`}
-        onClick={onToggle}
-        disabled={busy}
-        title={player.injured ? 'Restore Player' : 'Mark as Injured'}
-      >
-        {busy ? '...' : player.injured ? 'R' : 'X'}
-      </button>
     </div>
   );
 }
 
-function BenchPlayer({ player, onToggle, busy }) {
-  const rc = ratingColor(player.overall);
-  return (
-    <div className={`bench-player ${player.injured ? 'bench-player--injured' : ''}`}>
-      <span className="bench-pos">{player.position}</span>
-      <span className="bench-name">{player.name}</span>
-      <span className="bench-rating" style={{ color: rc }}>{player.overall}</span>
-      <button
-        className={`btn btn-sm ${player.injured ? 'btn-primary' : 'btn-secondary'}`}
-        style={{ fontSize: '0.7rem', padding: '4px 8px' }}
-        onClick={onToggle}
-        disabled={busy}
-      >
-        {busy ? '...' : player.injured ? 'Restore' : 'Injure'}
-      </button>
-    </div>
-  );
-}
-
-function RatingBar({ label, value, max = 100 }) {
-  const pct = Math.round((value / max) * 100);
-  const color =
-    label === 'Attack'   ? 'pink' :
-    label === 'Midfield' ? 'cyan' :
-    label === 'Defense'  ? 'green' : 'gold';
-  return (
-    <div className="rating-bar-row">
-      <span className="rating-bar-label label">{label}</span>
-      <div className="progress-bar" style={{ flex: 1 }}>
-        <div className={`progress-fill ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="rating-bar-val">{value}</span>
-    </div>
-  );
-}
-
+/* ─── Team Card ──────────────────────────────────────────── */
 function TeamCard({ team, confederation, rating, players, onSelect }) {
   const confColor = CONF_COLOR[confederation] || CONF_COLOR.OTHER;
-  const injured = players.filter(p => p.injured).length;
   const code = FLAG_MAP[team] || 'un';
 
   const getStars = (ovr) => {
-    if(ovr >= 85) return 5;
-    if(ovr >= 80) return 4;
-    if(ovr >= 75) return 3;
-    if(ovr >= 70) return 2;
+    if (ovr >= 85) return 5;
+    if (ovr >= 80) return 4;
+    if (ovr >= 75) return 3;
+    if (ovr >= 70) return 2;
     return 1;
   };
   const stars = getStars(rating.overall);
 
   return (
-    <div className="fc-card" onClick={() => onSelect(team)} role="button" tabIndex={0}
-      onKeyDown={e => e.key === 'Enter' && onSelect(team)}>
-      
+    <div
+      className="fc-card"
+      onClick={() => onSelect(team)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => e.key === 'Enter' && onSelect(team)}
+    >
       <div className="fc-card-inner">
         <div className="fc-card-top">
           <h3 className="fc-team-name">{team}</h3>
@@ -197,30 +195,35 @@ function TeamCard({ team, confederation, rating, players, onSelect }) {
         <div className="fc-card-middle">
           <div className="fc-flag-wrap">
             {code === 'un' ? (
-               <div className="fc-flag-fallback" style={{ background: confColor + '20', color: confColor }}>{team.slice(0,2).toUpperCase()}</div>
+              <div
+                className="fc-flag-fallback"
+                style={{ background: confColor + '20', color: confColor }}
+              >
+                {team.slice(0, 2).toUpperCase()}
+              </div>
             ) : (
-               <img src={`https://flagcdn.com/w320/${code}.png`} alt={team} className="fc-flag" />
+              <img src={`https://flagcdn.com/w320/${code}.png`} alt={team} className="fc-flag" />
             )}
           </div>
         </div>
 
         <div className="fc-card-stars">
-          {'★'.repeat(stars)}<span style={{opacity: 0.3}}>{'★'.repeat(5-stars)}</span>
+          {'★'.repeat(stars)}<span style={{ opacity: 0.3 }}>{'★'.repeat(5 - stars)}</span>
         </div>
 
         <div className="fc-card-bottom">
           <div className="fc-stats-view">
             <div className="fc-stat-col">
               <span className="fc-stat-label">ATT</span>
-              <span className="fc-stat-val">{Math.round(rating.attack)}-</span>
+              <span className="fc-stat-val">{Math.round(rating.attack)}</span>
             </div>
             <div className="fc-stat-col">
               <span className="fc-stat-label">MID</span>
-              <span className="fc-stat-val">{Math.round(rating.midfield)}-</span>
+              <span className="fc-stat-val">{Math.round(rating.midfield)}</span>
             </div>
             <div className="fc-stat-col">
               <span className="fc-stat-label">DEF</span>
-              <span className="fc-stat-val">{Math.round(rating.defense)}-</span>
+              <span className="fc-stat-val">{Math.round(rating.defense)}</span>
             </div>
           </div>
         </div>
@@ -229,74 +232,15 @@ function TeamCard({ team, confederation, rating, players, onSelect }) {
   );
 }
 
-function TeamModal({ teamData, onClose, onToggleInjury, updating }) {
-  const { team, confederation, rating, players } = teamData;
-  const confColor = CONF_COLOR[confederation] || CONF_COLOR.OTHER;
-  const injured = players.filter(p => p.injured).length;
-
-  return (
-    <div className="modal-overlay animate-in" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal-box animate-up">
-        <div className="modal-header" style={{ borderColor: confColor + '30' }}>
-          <div>
-            <div className="row gap-12 mb-8">
-              <span className="badge" style={{ background: confColor + '18', color: confColor, border: `1px solid ${confColor}30` }}>
-                {confederation}
-              </span>
-              {injured > 0 && <span className="badge badge-red">{injured} injured</span>}
-            </div>
-            <h2 className="display-md">{team}</h2>
-          </div>
-
-          <div className="modal-ratings">
-            <div className="modal-overall" style={{ color: ratingColor(rating.overall) }}>
-              {Math.round(rating.overall)}
-            </div>
-            <span className="label text-muted">Overall</span>
-          </div>
-
-          <button className="modal-close btn btn-ghost btn-sm" onClick={onClose}>Close</button>
-        </div>
-
-        <div className="modal-body">
-          <div className="modal-stat-row">
-            <div className="stat-block">
-              <span className="stat-value text-pink">{Math.round(rating.attack)}</span>
-              <span className="stat-label">Attack</span>
-            </div>
-            <div className="stat-block">
-              <span className="stat-value text-cyan">{Math.round(rating.midfield)}</span>
-              <span className="stat-label">Midfield</span>
-            </div>
-            <div className="stat-block">
-              <span className="stat-value text-green">{Math.round(rating.defense)}</span>
-              <span className="stat-label">Defense</span>
-            </div>
-          </div>
-
-          <div className="divider" />
-
-          <PitchView
-            players={players}
-            team={team}
-            onToggleInjury={onToggleInjury}
-            updating={updating}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
+/* ─── Main Page ──────────────────────────────────────────── */
 export default function SquadsPage() {
-  const [squads, setSquads]           = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [error, setError]             = useState(null);
-  const [search, setSearch]           = useState('');
-  const [confFilter, setConfFilter]   = useState('All');
-  const [sortBy, setSortBy]           = useState('overall');
-  const [selected, setSelected]       = useState(null);
-  const [updating, setUpdating]       = useState(null);
+  const [squads, setSquads] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState('');
+  const [confFilter, setConfFilter] = useState('All');
+  const [sortBy, setSortBy] = useState('overall');
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => {
     getSquads()
@@ -308,7 +252,7 @@ export default function SquadsPage() {
   const filtered = useMemo(() => {
     let result = squads.filter(t => {
       const matchSearch = t.team.toLowerCase().includes(search.toLowerCase());
-      const matchConf   = confFilter === 'All' || t.confederation === confFilter;
+      const matchConf = confFilter === 'All' || t.confederation === confFilter;
       return matchSearch && matchConf;
     });
 
@@ -323,32 +267,10 @@ export default function SquadsPage() {
     return result;
   }, [squads, search, confFilter, sortBy]);
 
-  const selectedData = useMemo(() =>
-    selected ? squads.find(t => t.team === selected) : null,
+  const selectedData = useMemo(
+    () => selected ? squads.find(t => t.team === selected) : null,
     [selected, squads]
   );
-
-  async function handleToggleInjury(team, player) {
-    setUpdating(player.name);
-    try {
-      const fn = player.injured ? restorePlayer : injurePlayer;
-      const res = await fn(team, player.name);
-      setSquads(prev => prev.map(t => {
-        if (t.team !== team) return t;
-        return {
-          ...t,
-          rating: res.new_rating,
-          players: t.players.map(p =>
-            p.name === player.name ? { ...p, injured: !player.injured } : p
-          ),
-        };
-      }));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setUpdating(null);
-    }
-  }
 
   return (
     <main className="squads-page page">
@@ -360,7 +282,7 @@ export default function SquadsPage() {
             <span className="label" style={{ color: 'rgba(255,255,255,0.5)' }}>FIFA WC 2026</span>
           </div>
           <h1>Squad <span>Explorer</span></h1>
-          <p>All 48 nations — EA FC 26 ratings, live injury management</p>
+          <p>All 48 nations — EA FC 26 ratings</p>
         </div>
       </div>
 
@@ -388,10 +310,10 @@ export default function SquadsPage() {
               </button>
             ))}
           </div>
-          <select 
-            className="fc-select" 
-            style={{ width: 'auto', minWidth: '150px' }} 
-            value={sortBy} 
+          <select
+            className="fc-select"
+            style={{ width: 'auto', minWidth: '150px' }}
+            value={sortBy}
             onChange={e => setSortBy(e.target.value)}
           >
             <option value="overall">Sort: Overall</option>
@@ -399,9 +321,7 @@ export default function SquadsPage() {
             <option value="midfield">Sort: Midfield</option>
             <option value="defense">Sort: Defense</option>
           </select>
-          <span className="fc-teams-count">
-            {filtered.length} teams
-          </span>
+          <span className="fc-teams-count">{filtered.length} teams</span>
         </div>
       </div>
 
@@ -435,23 +355,18 @@ export default function SquadsPage() {
                 className="animate-up"
                 style={{ animationDelay: `${Math.min(i * 30, 400)}ms` }}
               >
-                <TeamCard
-                  {...t}
-                  onSelect={setSelected}
-                />
+                <TeamCard {...t} onSelect={setSelected} />
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Team Modal */}
+      {/* Dossier Modal */}
       {selectedData && (
         <TeamModal
           teamData={selectedData}
           onClose={() => setSelected(null)}
-          onToggleInjury={handleToggleInjury}
-          updating={updating}
         />
       )}
     </main>
