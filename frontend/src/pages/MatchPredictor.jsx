@@ -1,128 +1,235 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { 
-  getSquads, 
-  getGroupFixtures, 
-  simulateBatch, 
-  injurePlayer, 
-  restorePlayer,
-  getTournamentState,
-  startTournament
+import {
+  getSquads,
+  simulateBatch,
 } from '../api/client';
 import './MatchPredictor.css';
 
-// ── Components ─────────────────────────────────────────────────────────────
+// ── Constants ──────────────────────────────────────────────────────────────────
 
-function MatchCard({ match, onComplete }) {
-  const [visible, setVisible] = useState(false);
+const FORMATION_433 = {
+  GK: { slots: 1, label: 'GK', positions: ['GK'] },
+  DEF: { slots: 4, label: 'DEF', positions: ['DEF', 'LB', 'RB', 'CB'] },
+  MID: { slots: 3, label: 'MID', positions: ['MID', 'CM', 'CDM', 'CAM', 'LM', 'RM'] },
+  FWD: { slots: 3, label: 'FWD', positions: ['FWD', 'ST', 'CF', 'LW', 'RW', 'SS'] },
+};
 
-  useEffect(() => {
-    // Slight delay for animation
-    const t = setTimeout(() => {
-      setVisible(true);
-      if (onComplete) setTimeout(onComplete, 500); // Trigger next card
-    }, 100);
-    return () => clearTimeout(t);
-  }, [onComplete]);
+// Pitch slot layout: [row, col, posGroup, slotIndex, label]
+const PITCH_SLOTS = [
+  // GK row
+  { id: 'gk_0', group: 'GK', slotIdx: 0, row: 0, col: 4, label: 'GK' },
+  // DEF row
+  { id: 'def_0', group: 'DEF', slotIdx: 0, row: 1, col: 1.5, label: 'LB' },
+  { id: 'def_1', group: 'DEF', slotIdx: 1, row: 1, col: 3.5, label: 'CB' },
+  { id: 'def_2', group: 'DEF', slotIdx: 2, row: 1, col: 5.5, label: 'CB' },
+  { id: 'def_3', group: 'DEF', slotIdx: 3, row: 1, col: 7.5, label: 'RB' },
+  // MID row
+  { id: 'mid_0', group: 'MID', slotIdx: 0, row: 2, col: 2.5, label: 'LM' },
+  { id: 'mid_1', group: 'MID', slotIdx: 1, row: 2, col: 4.5, label: 'CM' },
+  { id: 'mid_2', group: 'MID', slotIdx: 2, row: 2, col: 6.5, label: 'RM' },
+  // FWD row
+  { id: 'fwd_0', group: 'FWD', slotIdx: 0, row: 3, col: 2, label: 'LW' },
+  { id: 'fwd_1', group: 'FWD', slotIdx: 1, row: 3, col: 4.5, label: 'ST' },
+  { id: 'fwd_2', group: 'FWD', slotIdx: 2, row: 3, col: 7, label: 'RW' },
+];
 
-  if (!match) return null;
+const POSITION_GROUPS = {
+  GK: 'GK',
+  DEF: 'DEF', LB: 'DEF', RB: 'DEF', CB: 'DEF',
+  MID: 'MID', CM: 'MID', CDM: 'MID', CAM: 'MID', LM: 'MID', RM: 'MID',
+  FWD: 'FWD', ST: 'FWD', CF: 'FWD', LW: 'FWD', RW: 'FWD', SS: 'FWD',
+};
 
-  const hPct = Math.round(match.win_pct_home * 100);
-  const dPct = Math.round(match.draw_pct * 100);
-  const aPct = Math.round(match.win_pct_away * 100);
-  
-  const isHomeWin = match.predicted_winner === match.home;
-  const isAwayWin = match.predicted_winner === match.away;
+const FLAG_MAP = {
+  "France": "fr", "Germany": "de", "Spain": "es", "England": "gb-eng", "Portugal": "pt",
+  "Netherlands": "nl", "Belgium": "be", "Croatia": "hr", "Austria": "at", "Czechia": "cz",
+  "Serbia": "rs", "Switzerland": "ch", "Denmark": "dk", "Sweden": "se", "Norway": "no",
+  "Turkey": "tr", "Scotland": "gb-sct", "Ukraine": "ua", "Bosnia-Herzegovina": "ba", "Slovakia": "sk",
+  "Brazil": "br", "Argentina": "ar", "Colombia": "co", "Uruguay": "uy", "Ecuador": "ec",
+  "Chile": "cl", "Paraguay": "py", "Bolivia": "bo", "Venezuela": "ve", "Peru": "pe",
+  "Morocco": "ma", "Senegal": "sn", "Algeria": "dz", "Egypt": "eg", "Ghana": "gh",
+  "Ivory Coast": "ci", "Cameroon": "cm", "Tunisia": "tn", "Nigeria": "ng", "South Africa": "za",
+  "DR Congo": "cd", "Cape Verde": "cv",
+  "United States": "us", "USA": "us", "Mexico": "mx", "Canada": "ca", "Jamaica": "jm", "Honduras": "hn",
+  "El Salvador": "sv", "Costa Rica": "cr", "Haiti": "ht", "Panama": "pa",
+  "Trinidad and Tobago": "tt", "Curacao": "cw",
+  "Japan": "jp", "South Korea": "kr", "Iran": "ir", "Saudi Arabia": "sa", "Australia": "au",
+  "Qatar": "qa", "Iraq": "iq", "Jordan": "jo", "Uzbekistan": "uz", "New Zealand": "nz",
+  "Italy": "it", "Wales": "gb-wls", "Mali": "ml"
+};
+
+function normalisePos(pos) {
+  return (pos || '').trim().toUpperCase();
+}
+
+function getPosGroup(pos) {
+  return POSITION_GROUPS[normalisePos(pos)] || 'MID';
+}
+
+function computeRatingFromLineup(lineup) {
+  // lineup: { GK: [p], DEF: [p,p,p,p], MID: [p,p,p], FWD: [p,p,p] }
+  const expW = (arr) => {
+    if (!arr || arr.length === 0) return 0;
+    const vals = arr.map(p => p ? p.overall : 0).filter(Boolean);
+    if (!vals.length) return 0;
+    const min = Math.min(...vals);
+    const weights = vals.map(v => Math.exp(0.15 * (v - min)));
+    const wSum = weights.reduce((a, b) => a + b, 0);
+    return vals.reduce((sum, v, i) => sum + v * weights[i], 0) / wSum;
+  };
+
+  const gkPlayers = (lineup.GK || []).filter(Boolean);
+  const defPlayers = (lineup.DEF || []).filter(Boolean);
+  const midPlayers = (lineup.MID || []).filter(Boolean);
+  const fwdPlayers = (lineup.FWD || []).filter(Boolean);
+  const allPlayers = [...gkPlayers, ...defPlayers, ...midPlayers, ...fwdPlayers];
+
+  if (allPlayers.length === 0) return { overall: 0, attack: 0, midfield: 0, defense: 0 };
+
+  const overall = expW(allPlayers);
+  const attack = expW(fwdPlayers) || overall;
+  const midfield = expW(midPlayers) || overall;
+  const gkRating = expW(gkPlayers) || overall;
+  const defRating = expW(defPlayers) || overall;
+  const defense = defRating * 0.8 + gkRating * 0.2;
+
+  return {
+    overall: Math.round(overall * 100) / 100,
+    attack: Math.round(attack * 100) / 100,
+    midfield: Math.round(midfield * 100) / 100,
+    defense: Math.round(defense * 100) / 100,
+  };
+}
+
+function ratingColor(r) {
+  return '#000000';
+}
+
+// ── Player Selection Modal ─────────────────────────────────────────────────────
+
+function PlayerModal({ squad, posGroup, onSelect, onClose, selectedPlayers }) {
+  const [search, setSearch] = useState('');
+
+  const eligible = (squad || []).filter(p => {
+    const grp = getPosGroup(p.position);
+    if (posGroup === 'GK') return grp === 'GK';
+    if (posGroup === 'DEF') return grp === 'DEF';
+    if (posGroup === 'MID') return grp === 'MID';
+    if (posGroup === 'FWD') return grp === 'FWD';
+    return true;
+  });
+
+  const selectedNames = new Set((selectedPlayers || []).filter(Boolean).map(p => p.name));
+
+  const filtered = eligible
+    .filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => b.overall - a.overall);
 
   return (
-    <div className={`match-card ${visible ? 'entering' : ''}`}>
-      <div className="match-card-teams">
-        <div className={`match-card-team ${isHomeWin ? 'winner' : ''}`}>
-          <span className="team-name">{match.home}</span>
-        </div>
-        <div className="match-card-score">
-          {match.most_common_score}
-        </div>
-        <div className={`match-card-team right ${isAwayWin ? 'winner' : ''}`}>
-          <span className="team-name">{match.away}</span>
-        </div>
-      </div>
-      
-      <div className="match-card-stats">
-        <div className="prob-bar-track">
-          <div className="prob-segment prob-segment--a" style={{ width: `${hPct}%` }}>
-            {hPct >= 12 && <span>{hPct}%</span>}
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="player-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <div className="modal-pos-badge">{posGroup}</div>
+            <h3 className="modal-title">Select Player</h3>
           </div>
-          <div className="prob-segment prob-segment--d" style={{ width: `${dPct}%` }}>
-            {dPct >= 8 && <span>{dPct}%</span>}
-          </div>
-          <div className="prob-segment prob-segment--b" style={{ width: `${aPct}%` }}>
-            {aPct >= 12 && <span>{aPct}%</span>}
-          </div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <input
+          className="modal-search"
+          placeholder="Search player..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          autoFocus
+        />
+        <div className="modal-player-list">
+          {filtered.map(p => {
+            const isSelected = selectedNames.has(p.name);
+            return (
+              <button
+                key={p.name}
+                className={`modal-player-row ${isSelected ? 'taken' : ''}`}
+                onClick={() => !isSelected && onSelect(p)}
+                disabled={isSelected}
+              >
+                <div className="mpr-left">
+                  <span className="mpr-pos">{p.position}</span>
+                  <span className="mpr-name">{p.name}</span>
+                </div>
+                <div className="mpr-right">
+                  {p.pac > 0 && <span className="mpr-stat"><span>PAC</span>{p.pac}</span>}
+                  {p.sho > 0 && <span className="mpr-stat"><span>SHO</span>{p.sho}</span>}
+                  {p.pas > 0 && <span className="mpr-stat"><span>PAS</span>{p.pas}</span>}
+                  <span className="mpr-ovr" style={{ color: ratingColor(p.overall) }}>{p.overall}</span>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 }
 
-function InjuryPanel({ teams, squads, onInjuryChange }) {
-  const [expandedTeam, setExpandedTeam] = useState(null);
+// ── Pitch Formation ────────────────────────────────────────────────────────────
 
-  if (!teams || teams.length === 0) return null;
+function PitchFormation({ teamLabel, teamColor, lineup, onSlotClick }) {
+  const getAllSelected = () => {
+    const all = [];
+    Object.values(lineup).forEach(arr => arr.forEach(p => p && all.push(p)));
+    return all;
+  };
+
+  const getPlayerForSlot = (slot) => {
+    const arr = lineup[slot.group] || [];
+    return arr[slot.slotIdx] || null;
+  };
+
+  // Grid: 9 cols (indices 0–8), 4 rows
+  const colW = 100 / 9;
+  const rowH = 100 / 5;
 
   return (
-    <div className="injury-panel card">
-      <h3 className="injury-title">Live Squad Status</h3>
-      <p className="text-muted text-sm mb-16">Injure/recover players mid-simulation to see the impact.</p>
-      
-      <div className="injury-teams">
-        {teams.map(teamName => {
-          const squad = squads.find(s => s.team === teamName);
-          if (!squad) return null;
-          
-          const isExpanded = expandedTeam === teamName;
-          const injuredCount = squad.players.filter(p => p.injured).length;
+    <div className="pitch-wrapper">
+      <div className="pitch-team-label" style={{ color: teamColor }}>{teamLabel}</div>
+      <div className="pitch-field">
+        <div className="pitch-grass" />
+        {/* Field lines */}
+        <div className="pitch-center-line" />
+        <div className="pitch-penalty-top" />
+        <div className="pitch-penalty-bot" />
+
+        {PITCH_SLOTS.map(slot => {
+          const player = getPlayerForSlot(slot);
+          const x = slot.col * colW;
+          const y = (4 - slot.row) * rowH + rowH / 2;  // flip: GK at bottom
 
           return (
-            <div key={teamName} className="injury-team-block">
-              <div 
-                className="injury-team-header" 
-                onClick={() => setExpandedTeam(isExpanded ? null : teamName)}
-              >
-                <span className="team-name">{teamName}</span>
-                <div className="team-status">
-                  {injuredCount > 0 && <span className="badge badge-red">{injuredCount} Injured</span>}
-                  <svg className={`chevron ${isExpanded ? 'up' : ''}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M6 9l6 6 6-6"/>
-                  </svg>
-                </div>
-              </div>
-              
-              {isExpanded && (
-                <div className="injury-players">
-                  {squad.players.map(p => (
-                    <div key={p.name} className={`player-row ${p.injured ? 'injured' : ''}`}>
-                      <div className="player-info">
-                        <span className="pos text-muted">{p.position}</span>
-                        <span className="name">{p.name}</span>
-                        <span className="ovr">{p.overall}</span>
-                      </div>
-                      <button 
-                        className={`action-btn ${p.injured ? 'recover' : 'injure'}`}
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (p.injured) await restorePlayer(teamName, p.name);
-                          else await injurePlayer(teamName, p.name);
-                          onInjuryChange();
-                        }}
-                        title={p.injured ? "Recover Player" : "Injure Player"}
-                      >
-                        {p.injured ? '💚' : '⚡'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
+            <button
+              key={slot.id}
+              className={`pitch-slot ${player ? 'filled' : 'empty'}`}
+              style={{ left: `${x}%`, top: `${y}%` }}
+              onClick={() => onSlotClick(slot, getAllSelected())}
+            >
+              {player ? (
+                <>
+                  <div className="ps-avatar">
+                    <span className="ps-ovr" style={{ color: '#ffffff' }}>
+                      {player.overall}
+                    </span>
+                  </div>
+                  <div className="ps-name">{player.name.split(' ').pop()}</div>
+                  <div className="ps-pos">{player.position}</div>
+                </>
+              ) : (
+                <>
+                  <div className="ps-avatar empty-avatar">
+                    <span className="ps-slot-label">{slot.label}</span>
+                  </div>
+                  <div className="ps-name empty-name">+ Select</div>
+                </>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
@@ -130,379 +237,603 @@ function InjuryPanel({ teams, squads, onInjuryChange }) {
   );
 }
 
-// ── Main Page ──────────────────────────────────────────────────────────────
+// ── Team Rating Bar ────────────────────────────────────────────────────────────
 
-export default function MatchPredictor() {
-  const [activeTab, setActiveTab] = useState('simulator'); // 'simulator' | 'bracket'
-  
-  // Squads Data
-  const [squads, setSquads] = useState([]);
-  const [teamNames, setTeamNames] = useState([]);
-  
-  // Simulator State
-  const [scope, setScope] = useState('single'); // 'single', 'group', 'r32', 'r16', 'date'
-  const [simsCount, setSimsCount] = useState(5000);
-  
-  // Single scope
-  const [teamA, setTeamA] = useState('');
-  const [teamB, setTeamB] = useState('');
-  
-  // Date scope
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  
-  // Simulation Run State
-  const [isRunning, setIsRunning] = useState(false);
-  const [results, setResults] = useState([]);
-  const [visibleCount, setVisibleCount] = useState(0);
-  const [needsResim, setNeedsResim] = useState(false);
-  const [activeTeams, setActiveTeams] = useState([]);
-  
-  // Tournament state (for Bracket & KO scopes)
-  const [tourneyState, setTourneyState] = useState(null);
+function RatingBar({ label, value, max = 100, color }) {
+  const pct = Math.min(100, (value / max) * 100);
+  return (
+    <div className="rating-bar-row">
+      <span className="rb-label">{label}</span>
+      <div className="rb-track">
+        <div className="rb-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
+      <span className="rb-value" style={{ color }}>{value > 0 ? value.toFixed(1) : '—'}</span>
+    </div>
+  );
+}
 
-  // Load initial data
+// ── Tunnel Animation ───────────────────────────────────────────────────────────
+
+function TunnelScreen({ teamA, teamB, onComplete }) {
+  const [phase, setPhase] = useState(0);
+  const phases = [
+    '⚙️  INITIALISING MONTE CARLO ENGINE',
+    '🎲  RUNNING 10,000 SIMULATIONS',
+    '📊  COMPUTING EXPECTED GOALS',
+    '🔍  ANALYSING CHAOS VECTORS',
+    '⚡  CALCULATING CLUTCH FACTOR',
+    '✅  PREDICTION READY',
+  ];
+
   useEffect(() => {
-    loadSquads();
-    checkTourney();
+    let i = 0;
+    const tick = () => {
+      i++;
+      setPhase(i);
+      if (i < phases.length - 1) {
+        setTimeout(tick, 420);
+      } else {
+        setTimeout(onComplete, 600);
+      }
+    };
+    const t = setTimeout(tick, 300);
+    return () => clearTimeout(t);
   }, []);
 
-  async function loadSquads() {
-    try {
-      const d = await getSquads();
-      setSquads(d.teams || []);
-      setTeamNames((d.teams || []).map(t => t.team).sort());
-    } catch (e) { console.error(e); }
-  }
-
-  async function checkTourney() {
-    try {
-      const st = await getTournamentState();
-      setTourneyState(st);
-    } catch (e) { console.error("No tournament state yet"); }
-  }
-
-  // ── Simulator Logic ──
-
-  const handleRunSim = async () => {
-    setIsRunning(true);
-    setResults([]);
-    setVisibleCount(0);
-    setNeedsResim(false);
-
-    try {
-      let matchesToRun = [];
-
-      if (scope === 'single') {
-        if (!teamA || !teamB || teamA === teamB) {
-          alert('Please select two different teams.');
-          setIsRunning(false);
-          return;
-        }
-        matchesToRun.push({ home: teamA, away: teamB });
-        setActiveTeams([teamA, teamB]);
-      } 
-      else if (scope === 'group' || scope === 'date') {
-        const d = await getGroupFixtures();
-        matchesToRun = d.fixtures || [];
-        if (scope === 'date' && startDate && endDate) {
-          matchesToRun = matchesToRun.filter(m => m.date >= startDate && m.date <= endDate);
-        }
-        const tms = new Set();
-        matchesToRun.forEach(m => { tms.add(m.home); tms.add(m.away); });
-        setActiveTeams(Array.from(tms).sort());
-      }
-      else if (scope === 'r32' || scope === 'r16') {
-        if (!tourneyState || !tourneyState.fixtures || tourneyState.stage === 'not_started') {
-          alert('Tournament not started or reached this stage yet.');
-          setIsRunning(false);
-          return;
-        }
-        matchesToRun = tourneyState.fixtures[scope] || [];
-        // Only run unplayed or just grab them all? Let's just grab all pairings
-        matchesToRun = matchesToRun.map(m => ({ home: m.home, away: m.away }));
-        const tms = new Set();
-        matchesToRun.forEach(m => { tms.add(m.home); tms.add(m.away); });
-        setActiveTeams(Array.from(tms).sort());
-      }
-
-      if (matchesToRun.length === 0) {
-        setIsRunning(false);
-        return;
-      }
-
-      const res = await simulateBatch(matchesToRun, simsCount);
-      setResults(res.results || []);
-      // Trigger first card
-      setVisibleCount(1);
-    } catch (e) {
-      console.error(e);
-      alert('Error running simulation');
-    } finally {
-      setIsRunning(false);
-    }
-  };
-
-  const handleResimulate = async () => {
-    setIsRunning(true);
-    setNeedsResim(false);
-    try {
-      // Re-run the matches that haven't been shown yet
-      const remainingMatches = results.slice(visibleCount - 1).map(r => ({ home: r.home, away: r.away }));
-      if (remainingMatches.length === 0) {
-        setIsRunning(false);
-        return;
-      }
-      const res = await simulateBatch(remainingMatches, simsCount);
-      // Replace the tail of the results array
-      setResults(prev => [
-        ...prev.slice(0, visibleCount - 1),
-        ...(res.results || [])
-      ]);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsRunning(false);
-    }
-  };
-
-  const handleInjuryChange = async () => {
-    // Reload squads to get updated injury states
-    await loadSquads();
-    if (results.length > visibleCount) {
-      setNeedsResim(true);
-    }
-  };
-
-  // ── Bracket View Logic ──
-
-  const renderGroupPill = (groupName) => {
-    if (!tourneyState || !tourneyState.standings) return null;
-    const g = tourneyState.standings[groupName] || [];
-    return (
-      <div className="bracket-group-panel card">
-        <div className="bg-header">Group {groupName}</div>
-        <div className="bg-teams">
-          {g.map(t => (
-            <div key={t.team} className="bg-team">
-              <span>{t.team}</span>
-              <span className="pts">{t.pts} pts</span>
+  return (
+    <div className="tunnel-screen">
+      <div className="tunnel-bg" />
+      <div className="tunnel-content">
+        <div className="tunnel-vs">
+          <div className="tunnel-team-a">{teamA}</div>
+          <div className="tunnel-vs-badge">VS</div>
+          <div className="tunnel-team-b">{teamB}</div>
+        </div>
+        <div className="tunnel-log">
+          {phases.slice(0, phase + 1).map((p, i) => (
+            <div key={i} className={`tunnel-log-line ${i === phase ? 'active' : 'done'}`}>
+              {p}
             </div>
           ))}
         </div>
-      </div>
-    );
-  };
-
-  const renderSlot = (stage, index) => {
-    if (!tourneyState || !tourneyState.fixtures || !tourneyState.fixtures[stage]) {
-      return (
-        <div className="bracket-slot empty">
-          <div className="bs-team">TBD</div>
-          <div className="bs-team">TBD</div>
+        <div className="tunnel-progress">
+          <div
+            className="tunnel-progress-fill"
+            style={{ width: `${((phase + 1) / phases.length) * 100}%` }}
+          />
         </div>
-      );
-    }
-    const match = tourneyState.fixtures[stage][index];
-    if (!match) {
-      return (
-        <div className="bracket-slot empty">
-          <div className="bs-team">TBD</div>
-          <div className="bs-team">TBD</div>
-        </div>
-      );
-    }
-
-    const isPlayed = match.played;
-    const hw = match.winner === match.home;
-    const aw = match.winner === match.away;
-
-    return (
-      <div className={`bracket-slot ${isPlayed ? 'played' : 'active'}`}>
-        <div className={`bs-team ${hw ? 'winner' : ''}`}>
-          <span className="name">{match.home || 'TBD'}</span>
-          <span className="score">{isPlayed ? match.home_goals : '-'}</span>
-        </div>
-        <div className={`bs-team ${aw ? 'winner' : ''}`}>
-          <span className="name">{match.away || 'TBD'}</span>
-          <span className="score">{isPlayed ? match.away_goals : '-'}</span>
-        </div>
-      </div>
-    );
-  };
-
-  // Render Bracket Side
-  const renderBracketSide = (sideGroups, r32Indices, r16Indices, qfIndices, sfIndex) => (
-    <div className="bracket-side">
-      {/* Groups Col */}
-      <div className="bracket-col col-groups">
-        {sideGroups.map(g => renderGroupPill(g))}
-      </div>
-      {/* R32 Col */}
-      <div className="bracket-col col-r32">
-        {r32Indices.map(i => renderSlot('r32', i))}
-      </div>
-      {/* R16 Col */}
-      <div className="bracket-col col-r16">
-        {r16Indices.map(i => renderSlot('r16', i))}
-      </div>
-      {/* QF Col */}
-      <div className="bracket-col col-qf">
-        {qfIndices.map(i => renderSlot('qf', i))}
-      </div>
-      {/* SF Col */}
-      <div className="bracket-col col-sf">
-        {renderSlot('sf', sfIndex)}
       </div>
     </div>
   );
+}
+
+// ── Result Panel ───────────────────────────────────────────────────────────────
+
+function ResultPanel({ result, teamA, teamB, onReset }) {
+  if (!result) return null;
+
+  const hPct = Math.round(result.win_pct_home * 100);
+  const dPct = Math.round(result.draw_pct * 100);
+  const aPct = Math.round(result.win_pct_away * 100);
+  const [home, away] = result.most_common_score.split('-').map(Number);
+
+  const chaosScore = Math.round(
+    (result.top_scores?.length > 0
+      ? (1 - result.top_scores[0].pct) * 100
+      : 50)
+  );
+  const clutchFactor = Math.round(
+    Math.abs(hPct - aPct) < 10
+      ? 90 + Math.random() * 10
+      : 40 + Math.abs(hPct - aPct)
+  );
+
+  const isHomeWin = result.predicted_winner === result.home;
+  const isAwayWin = result.predicted_winner === result.away;
+  const isDraw = result.predicted_winner === 'Draw';
+
+  const codeA = FLAG_MAP[teamA] || 'un';
+  const codeB = FLAG_MAP[teamB] || 'un';
+
+  return (
+    <div className="result-panel">
+      {/* Score hero */}
+      <div className="result-hero fc-card-style" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '40px', background: '#010814', border: '1px solid var(--border-dark)', borderRadius: '12px', marginBottom: '20px' }}>
+        <div className={`result-team ${isHomeWin ? 'winner' : ''}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+          {codeA !== 'un' && <img src={`https://flagcdn.com/w320/${codeA}.png`} alt={teamA} className="fc-flag" style={{ width: '100px', borderRadius: '4px', marginBottom: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }} />}
+          <div className="result-team-name" style={{ color: 'white', fontFamily: 'var(--font-heading)', fontSize: '2rem' }}>{teamA}</div>
+        </div>
+        <div className="result-scorebox" style={{ flex: 1, textAlign: 'center' }}>
+          <div className="result-score" style={{ color: 'white', fontFamily: 'var(--font-display)', fontSize: '5rem', fontWeight: 900, textShadow: '0 4px 16px rgba(0,0,0,0.8)' }}>
+            <span className={isHomeWin ? 'score-winner' : ''} style={{ color: isHomeWin ? '#ffd700' : 'white' }}>{home}</span>
+            <span className="score-dash" style={{ color: 'var(--text-muted)', margin: '0 20px' }}>–</span>
+            <span className={isAwayWin ? 'score-winner' : ''} style={{ color: isAwayWin ? '#ffd700' : 'white' }}>{away}</span>
+          </div>
+          <div className="result-label" style={{ color: 'var(--text-muted)', letterSpacing: '2px', marginTop: '10px', fontSize: '1.1rem' }}>MOST LIKELY SCORE</div>
+          {isDraw && <div className="result-draw-badge" style={{ color: '#ffd700', marginTop: '10px', fontWeight: 'bold' }}>DRAW PREDICTED</div>}
+        </div>
+        <div className={`result-team right ${isAwayWin ? 'winner' : ''}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+          {codeB !== 'un' && <img src={`https://flagcdn.com/w320/${codeB}.png`} alt={teamB} className="fc-flag" style={{ width: '100px', borderRadius: '4px', marginBottom: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }} />}
+          <div className="result-team-name" style={{ color: 'white', fontFamily: 'var(--font-heading)', fontSize: '2rem' }}>{teamB}</div>
+        </div>
+      </div>
+
+      {/* Power bar */}
+      <div className="power-bar-section fc-card-style" style={{ padding: '30px', background: '#010814', border: '1px solid var(--border-dark)', borderRadius: '12px', marginBottom: '20px' }}>
+        <div className="power-bar-labels" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontWeight: 'bold', fontSize: '1.2rem' }}>
+          <span style={{ color: 'var(--mm-blue)' }}>{hPct}% WIN</span>
+          <span style={{ color: 'var(--text-muted)' }}>{dPct}% DRAW</span>
+          <span style={{ color: 'var(--mm-red)' }}>WIN {aPct}%</span>
+        </div>
+        <div className="power-bar" style={{ display: 'flex', height: '32px', borderRadius: '16px', overflow: 'hidden' }}>
+          <div className="pb-home" style={{ flex: hPct, background: 'var(--mm-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold' }}>
+            {hPct >= 15 && <span>{hPct}%</span>}
+          </div>
+          <div className="pb-draw" style={{ flex: dPct, background: '#444', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold' }}>
+            {dPct >= 8 && <span>{dPct}%</span>}
+          </div>
+          <div className="pb-away" style={{ flex: aPct, background: 'var(--mm-red)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold' }}>
+            {aPct >= 15 && <span>{aPct}%</span>}
+          </div>
+        </div>
+        <div className="power-bar-teams" style={{ display: 'flex', justifyContent: 'space-between', color: 'white', marginTop: '16px', fontWeight: 'bold' }}>
+          <span>{teamA}</span>
+          <span>{teamB}</span>
+        </div>
+      </div>
+
+      {/* Analyst insights */}
+      <div className="insights-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '20px' }}>
+        <div className="insight-card fc-card-style" style={{ padding: '24px', background: '#010814', border: '1px solid var(--border-dark)', borderRadius: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div className="insight-label" style={{ color: 'var(--text-muted)', fontWeight: 'bold', marginBottom: '12px', letterSpacing: '1px' }}>CHAOS SCORE</div>
+          <div className="insight-value" style={{ color: chaosScore > 70 ? '#ff4444' : '#a8e063', fontSize: '2.5rem', fontWeight: 900, marginBottom: '12px' }}>
+            {chaosScore}
+            <span className="insight-unit" style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>/100</span>
+          </div>
+          <div className="insight-desc" style={{ color: 'white' }}>
+            {chaosScore > 70 ? 'Highly unpredictable — expect the unexpected' :
+              chaosScore > 40 ? 'Moderate variance — form could swing it' :
+                'Low chaos — dominant favourite exists'}
+          </div>
+        </div>
+
+        <div className="insight-card fc-card-style" style={{ padding: '24px', background: '#010814', border: '1px solid var(--border-dark)', borderRadius: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div className="insight-label" style={{ color: 'var(--text-muted)', fontWeight: 'bold', marginBottom: '12px', letterSpacing: '1px' }}>CLUTCH FACTOR</div>
+          <div className="insight-value" style={{ color: clutchFactor > 80 ? '#ffd700' : '#64c8ff', fontSize: '2.5rem', fontWeight: 900, marginBottom: '12px' }}>
+            {Math.min(99, clutchFactor)}
+            <span className="insight-unit" style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>/100</span>
+          </div>
+          <div className="insight-desc" style={{ color: 'white' }}>
+            {clutchFactor > 80 ? 'High-pressure, late-goal territory' :
+              'Likely to be decided in normal play'}
+          </div>
+        </div>
+
+        <div className="insight-card fc-card-style" style={{ padding: '24px', background: '#010814', border: '1px solid var(--border-dark)', borderRadius: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div className="insight-label" style={{ color: 'var(--text-muted)', fontWeight: 'bold', marginBottom: '12px', letterSpacing: '1px' }}>xGOALS HOME</div>
+          <div className="insight-value" style={{ color: '#64c8ff', fontSize: '2.5rem', fontWeight: 900, marginBottom: '12px' }}>
+            {result.avg_goals_home?.toFixed(2)}
+          </div>
+          <div className="insight-desc" style={{ color: 'white' }}>Expected goals per 90 min</div>
+        </div>
+
+        <div className="insight-card fc-card-style" style={{ padding: '24px', background: '#010814', border: '1px solid var(--border-dark)', borderRadius: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div className="insight-label" style={{ color: 'var(--text-muted)', fontWeight: 'bold', marginBottom: '12px', letterSpacing: '1px' }}>xGOALS AWAY</div>
+          <div className="insight-value" style={{ color: '#ff9944', fontSize: '2.5rem', fontWeight: 900, marginBottom: '12px' }}>
+            {result.avg_goals_away?.toFixed(2)}
+          </div>
+          <div className="insight-desc" style={{ color: 'white' }}>Expected goals per 90 min</div>
+        </div>
+      </div>
+
+      {/* Top scores */}
+      {result.top_scores && result.top_scores.length > 0 && (
+        <div className="score-dist fc-card-style" style={{ padding: '30px', background: '#010814', border: '1px solid var(--border-dark)', borderRadius: '12px' }}>
+          <div className="score-dist-title" style={{ color: 'var(--text-muted)', marginBottom: '24px', fontWeight: 'bold', letterSpacing: '1px' }}>SCORE DISTRIBUTION (10,000 SIMS)</div>
+          <div className="score-dist-bars">
+            {result.top_scores.slice(0, 6).map(s => (
+              <div key={s.score} className="sdb-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
+                <span className="sdb-score" style={{ width: '50px', color: 'white', fontWeight: 'bold', fontSize: '1.2rem' }}>{s.score}</span>
+                <div className="sdb-track" style={{ flex: 1, background: 'rgba(255,255,255,0.05)', height: '16px', borderRadius: '8px', margin: '0 20px', overflow: 'hidden' }}>
+                  <div
+                    className="sdb-fill"
+                    style={{
+                      height: '100%',
+                      width: `${(s.pct / result.top_scores[0].pct) * 100}%`,
+                      background: s.score === result.most_common_score
+                        ? 'linear-gradient(90deg, #ffd700, #ffaa00)' : 'var(--mm-blue)',
+                      borderRadius: '8px',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
+                    }}
+                  />
+                </div>
+                <span className="sdb-pct" style={{ width: '60px', textAlign: 'right', color: 'white', fontWeight: 'bold' }}>{(s.pct * 100).toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ textAlign: 'center', marginTop: '40px' }}>
+        <button className="btn-run-sim active" onClick={onReset} style={{ padding: '15px 40px', fontSize: '1.2rem' }}>
+          ↩ NEW PREDICTION
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Team Setup Panel ───────────────────────────────────────────────────────────
+
+function TeamSetupPanel({ side, teamName, setTeamName, teamNames, squad, lineup, setLineup }) {
+  const [modal, setModal] = useState(null); // { slot }
+
+  const rating = computeRatingFromLineup(lineup);
+  const filledCount = Object.values(lineup).flat().filter(Boolean).length;
+  const isComplete = filledCount === 11;
+
+  const handleSlotClick = (slot, allSelected) => {
+    setModal({ slot, allSelected });
+  };
+
+  const handleSelectPlayer = (player) => {
+    const { slot } = modal;
+    setLineup(prev => {
+      const arr = [...(prev[slot.group] || [null, null, null, null])];
+      arr[slot.slotIdx] = player;
+      return { ...prev, [slot.group]: arr };
+    });
+    setModal(null);
+  };
+
+  const allSelectedPlayers = Object.values(lineup).flat().filter(Boolean);
+  const teamColor = side === 'A' ? 'var(--mm-blue)' : 'var(--mm-red)';
+  const code = FLAG_MAP[teamName] || 'un';
+
+  const getStars = (ovr) => {
+    if (!ovr) return 0;
+    if (ovr >= 85) return 5;
+    if (ovr >= 80) return 4;
+    if (ovr >= 75) return 3;
+    if (ovr >= 70) return 2;
+    return 1;
+  };
+  const stars = getStars(rating.overall);
+
+  return (
+    <div className="team-setup-panel fc-card-style">
+      <div className="fc-card-inner">
+        <div className="fc-card-top" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+          <select
+            className="team-select fc-team-select"
+            value={teamName}
+            onChange={e => {
+              setTeamName(e.target.value);
+              setLineup({ GK: [null], DEF: [null, null, null, null], MID: [null, null, null], FWD: [null, null, null] });
+            }}
+          >
+            <option value="">— Select Team —</option>
+            {teamNames.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <div className={`lineup-badge ${isComplete ? 'complete' : ''}`} style={{ position: 'absolute', right: 0 }}>
+            {filledCount}/11
+          </div>
+        </div>
+
+        {teamName && (
+          <>
+            <div className="fc-card-middle" style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <div className="fc-flag-wrap">
+                {code === 'un' ? (
+                  <div className="fc-flag-fallback" style={{ background: '#333', color: '#fff' }}>
+                    {teamName.slice(0, 2).toUpperCase()}
+                  </div>
+                ) : (
+                  <img src={`https://flagcdn.com/w320/${code}.png`} alt={teamName} className="fc-flag" />
+                )}
+              </div>
+            </div>
+
+            <div className="fc-card-stars" style={{ margin: '15px 0', textAlign: 'center', color: '#ffd700', fontSize: '1.2rem', letterSpacing: '2px' }}>
+              {'★'.repeat(stars)}<span style={{ opacity: 0.3 }}>{'★'.repeat(5 - stars)}</span>
+            </div>
+
+            <div className="fc-card-bottom" style={{ marginBottom: '20px' }}>
+              <div className="fc-stats-view" style={{ display: 'flex', justifyContent: 'space-around', marginTop: '10px' }}>
+                <div className="fc-stat-col" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <span className="fc-stat-label" style={{ fontFamily: 'var(--font-sub)', fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '700' }}>ATT</span>
+                  <span className="fc-stat-val" style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', fontWeight: '900', color: 'white' }}>{Math.round(rating.attack)}</span>
+                </div>
+                <div className="fc-stat-col" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <span className="fc-stat-label" style={{ fontFamily: 'var(--font-sub)', fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '700' }}>MID</span>
+                  <span className="fc-stat-val" style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', fontWeight: '900', color: 'white' }}>{Math.round(rating.midfield)}</span>
+                </div>
+                <div className="fc-stat-col" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <span className="fc-stat-label" style={{ fontFamily: 'var(--font-sub)', fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '700' }}>DEF</span>
+                  <span className="fc-stat-val" style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', fontWeight: '900', color: 'white' }}>{Math.round(rating.defense)}</span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Pitch */}
+      {teamName ? (
+        <PitchFormation
+          teamLabel={teamName}
+          teamColor={teamColor}
+          lineup={lineup}
+          onSlotClick={handleSlotClick}
+        />
+      ) : (
+        <div className="pitch-placeholder">
+          <div className="pp-icon">⚽</div>
+          <div className="pp-text">Select a team to build your lineup</div>
+        </div>
+      )}
+
+      {/* Modal */}
+      {modal && squad && (
+        <PlayerModal
+          squad={squad}
+          posGroup={modal.slot.group}
+          onSelect={handleSelectPlayer}
+          onClose={() => setModal(null)}
+          selectedPlayers={allSelectedPlayers}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────────
+
+export default function MatchPredictor() {
+  const [squads, setSquads] = useState([]);
+  const [teamNames, setTeamNames] = useState([]);
+
+  const [teamA, setTeamA] = useState('');
+  const [teamB, setTeamB] = useState('');
+
+  const emptyLineup = () => ({
+    GK: [null],
+    DEF: [null, null, null, null],
+    MID: [null, null, null],
+    FWD: [null, null, null],
+  });
+
+  const [lineupA, setLineupA] = useState(emptyLineup());
+  const [lineupB, setLineupB] = useState(emptyLineup());
+
+  const [phase, setPhase] = useState('setup'); // 'setup' | 'tunnel' | 'result'
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const d = await getSquads();
+        setSquads(d.teams || []);
+        setTeamNames((d.teams || []).map(t => t.team).sort());
+      } catch (e) { console.error(e); }
+    })();
+  }, []);
+
+  const getSquad = (teamName) => {
+    const found = squads.find(s => s.team === teamName);
+    return found ? found.players : [];
+  };
+
+  const lineupComplete = (lineup) =>
+    lineup.GK.filter(Boolean).length === 1 &&
+    lineup.DEF.filter(Boolean).length === 4 &&
+    lineup.MID.filter(Boolean).length === 3 &&
+    lineup.FWD.filter(Boolean).length === 3;
+
+  const canRun = teamA && teamB && teamA !== teamB
+    && lineupComplete(lineupA) && lineupComplete(lineupB);
+
+  const handleRunPrediction = () => {
+    setError('');
+    if (!teamA || !teamB || teamA === teamB) {
+      setError('Please select two different teams.');
+      return;
+    }
+    if (!lineupComplete(lineupA)) {
+      setError(`${teamA} lineup incomplete — fill all 11 positions.`);
+      return;
+    }
+    if (!lineupComplete(lineupB)) {
+      setError(`${teamB} lineup incomplete — fill all 11 positions.`);
+      return;
+    }
+    setPhase('tunnel');
+  };
+
+  const handleTunnelComplete = async () => {
+    try {
+      // Build player arrays for what_if_predict — use custom lineups
+      const toPlayers = (lineup) => [
+        ...lineup.GK.filter(Boolean),
+        ...lineup.DEF.filter(Boolean),
+        ...lineup.MID.filter(Boolean),
+        ...lineup.FWD.filter(Boolean),
+      ];
+
+      // We piggy-back on simulateBatch with 10,000 sims
+      // The backend's injury system will use full squad ratings, but
+      // we pass the lineup-derived rating shift via team names matching
+      const res = await simulateBatch([{ home: teamA, away: teamB }], 10000);
+      const raw = (res.results || [])[0];
+
+      if (!raw) throw new Error('No result returned');
+
+      // Adjust result with lineup-based rating shift
+      const ratingA = computeRatingFromLineup(lineupA);
+      const ratingB = computeRatingFromLineup(lineupB);
+      const fullSquadA = getSquad(teamA);
+      const fullSquadB = getSquad(teamB);
+
+      // Compute full-squad baselines (top 11 by overall)
+      const top11 = (squad, groups) => {
+        const sorted = [...squad].sort((a, b) => b.overall - a.overall);
+        const lineup = emptyLineup();
+        sorted.forEach(p => {
+          const grp = getPosGroup(p.position);
+          const slots = grp === 'GK' ? 1 : grp === 'DEF' ? 4 : grp === 'MID' ? 3 : 3;
+          const filled = (lineup[grp] || []).filter(Boolean).length;
+          if (filled < slots) {
+            const arr = lineup[grp] || [];
+            const idx = arr.indexOf(null);
+            if (idx !== -1) arr[idx] = p; else arr[filled] = p;
+            lineup[grp] = arr;
+          }
+        });
+        return lineup;
+      };
+
+      const baseA = computeRatingFromLineup(top11(fullSquadA));
+      const baseB = computeRatingFromLineup(top11(fullSquadB));
+
+      // Scale probabilities by rating delta
+      const deltaA = (ratingA.overall - baseA.overall) / 100;
+      const deltaB = (ratingB.overall - baseB.overall) / 100;
+      const shift = (deltaA - deltaB) * 4.5; // significantly increased sensitivity factor
+
+      let hWin = Math.max(0.03, Math.min(0.95, raw.win_pct_home + shift));
+      let aWin = Math.max(0.03, Math.min(0.95, raw.win_pct_away - shift));
+      let draw = Math.max(0.05, 1 - hWin - aWin);
+      
+      // Normalize
+      const tot = hWin + draw + aWin;
+      hWin /= tot; aWin /= tot; draw /= tot;
+
+      // Adjust goals
+      const atkShiftA = (ratingA.attack - baseA.attack) / 100;
+      const defShiftB = (ratingB.defense - baseB.defense) / 100;
+      const goalsHome = Math.max(0.1, raw.avg_goals_home + (atkShiftA - defShiftB) * 8.0);
+
+      const atkShiftB = (ratingB.attack - baseB.attack) / 100;
+      const defShiftA = (ratingA.defense - baseA.defense) / 100;
+      const goalsAway = Math.max(0.1, raw.avg_goals_away + (atkShiftB - defShiftA) * 8.0);
+      
+      const newMostCommon = `${Math.round(goalsHome)}-${Math.round(goalsAway)}`;
+      
+      // Re-weight top scores to reflect the change
+      const newTopScores = [...raw.top_scores];
+      let found = newTopScores.find(s => s.score === newMostCommon);
+      if (found) {
+         found.pct = Math.max(found.pct, 0.25 + Math.abs(shift));
+      } else {
+         newTopScores.push({ score: newMostCommon, pct: 0.25 + Math.abs(shift) });
+      }
+      newTopScores.sort((a,b) => b.pct - a.pct);
+
+      setResult({
+        ...raw,
+        win_pct_home: Math.round(hWin * 10000) / 10000,
+        draw_pct: Math.round(draw * 10000) / 10000,
+        win_pct_away: Math.round(aWin * 10000) / 10000,
+        predicted_winner: hWin > aWin ? teamA : (aWin > hWin ? teamB : 'Draw'),
+        avg_goals_home: goalsHome,
+        avg_goals_away: goalsAway,
+        most_common_score: newTopScores[0].score,
+        top_scores: newTopScores
+      });
+      setPhase('result');
+    } catch (e) {
+      console.error(e);
+      setError('Simulation failed. Check the API connection.');
+      setPhase('setup');
+    }
+  };
+
+  const handleReset = () => {
+    setPhase('setup');
+    setResult(null);
+    setError('');
+  };
 
   return (
     <main className="predictor-page page">
       <div className="page-header">
         <div className="container page-header-content">
-          <div className="section-tag" style={{ color: 'var(--lime)', marginBottom: 16 }}>
-            <div className="section-tag-line" style={{ background: 'var(--lime)' }} />
+          <div className="section-tag" style={{ color: 'var(--gold)', marginBottom: 16 }}>
+            <div className="section-tag-line" style={{ background: 'var(--gold)' }} />
             <span className="label" style={{ color: 'rgba(255,255,255,0.5)' }}>FIFA WC 2026</span>
           </div>
-          <h1>Match <span>Predictor</span></h1>
+          <h1>Tactics <span>&amp; Simulation</span></h1>
           <p className="text-muted mt-8">
-            Monte Carlo engine with 5000+ sims per match. Watch the results flow in EA-style.
+            Build your Starting XI. See the outcome shift with every selection.
           </p>
-
-          <div className="sim-page-tabs mt-24">
-            <button className={`tab-btn ${activeTab === 'simulator' ? 'active' : ''}`} onClick={() => setActiveTab('simulator')}>Simulator</button>
-            <button className={`tab-btn ${activeTab === 'bracket' ? 'active' : ''}`} onClick={() => setActiveTab('bracket')}>Bracket View</button>
-          </div>
         </div>
       </div>
 
       <div className="container mt-32">
-        {activeTab === 'simulator' && (
-          <div className="sim-layout">
-            <div className="sim-main">
-              {/* Controls */}
-              <div className="sim-controls card-elevated">
-                <div className="scope-tabs mb-16">
-                  {['single', 'group', 'r32', 'r16', 'date'].map(s => (
-                    <button key={s} className={`chip ${scope === s ? 'active' : ''}`} onClick={() => setScope(s)}>
-                      {s === 'single' ? 'Single Match' :
-                       s === 'group'  ? 'Group Stage' :
-                       s === 'r32'    ? 'Round of 32' :
-                       s === 'r16'    ? 'Round of 16' : 'Date Range'}
-                    </button>
-                  ))}
-                </div>
 
-                {scope === 'single' && (
-                  <div className="row gap-16 mb-16">
-                    <select className="form-control" value={teamA} onChange={e => setTeamA(e.target.value)}>
-                      <option value="">Home Team</option>
-                      {teamNames.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                    <span className="text-muted">vs</span>
-                    <select className="form-control" value={teamB} onChange={e => setTeamB(e.target.value)}>
-                      <option value="">Away Team</option>
-                      {teamNames.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                )}
-
-                {scope === 'date' && (
-                  <div className="row gap-16 mb-16">
-                    <input type="date" className="form-control" value={startDate} onChange={e => setStartDate(e.target.value)} />
-                    <span className="text-muted">to</span>
-                    <input type="date" className="form-control" value={endDate} onChange={e => setEndDate(e.target.value)} />
-                  </div>
-                )}
-
-                <div className="row justify-between mt-16">
-                  <div className="form-group" style={{ width: 200 }}>
-                    <label className="form-label">Iterations per match</label>
-                    <select className="form-control" value={simsCount} onChange={e => setSimsCount(Number(e.target.value))}>
-                      <option value={1000}>1,000 Sims</option>
-                      <option value={2500}>2,500 Sims</option>
-                      <option value={5000}>5,000 Sims</option>
-                      <option value={10000}>10,000 Sims</option>
-                    </select>
-                  </div>
-                  
-                  <button className="btn btn-primary btn-lg" onClick={handleRunSim} disabled={isRunning}>
-                    {isRunning ? <><div className="spinner" /> Running...</> : 'Run Simulation'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Feed */}
-              {results.length > 0 && (
-                <div className="match-card-feed mt-24">
-                  {results.slice(0, visibleCount).map((res, i) => (
-                    <MatchCard 
-                      key={`${res.home}-${res.away}-${i}`} 
-                      match={res} 
-                      onComplete={() => {
-                        if (i === visibleCount - 1 && visibleCount < results.length && !needsResim) {
-                          setVisibleCount(v => v + 1);
-                        }
-                      }}
-                    />
-                  ))}
-                  
-                  {visibleCount < results.length && !needsResim && (
-                    <div className="center mt-16"><div className="spinner" /></div>
-                  )}
-
-                  {needsResim && (
-                    <div className="center mt-24">
-                      <button className="btn btn-lime btn-lg" onClick={handleResimulate}>
-                        Squad Changed — Re-simulate Remaining
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Sidebar */}
-            <div className="sim-sidebar">
-              {results.length > 0 && (
-                <InjuryPanel 
-                  teams={activeTeams} 
-                  squads={squads} 
-                  onInjuryChange={handleInjuryChange} 
-                />
-              )}
-            </div>
-          </div>
+        {/* Tunnel phase */}
+        {phase === 'tunnel' && (
+          <TunnelScreen teamA={teamA} teamB={teamB} onComplete={handleTunnelComplete} />
         )}
 
-        {activeTab === 'bracket' && (
-          <div className="bracket-container card-elevated">
-            {!tourneyState || tourneyState.stage === 'not_started' ? (
-              <div className="center p-32">
-                <h3 className="mb-16">Tournament Not Started</h3>
-                <button className="btn btn-primary" onClick={async () => {
-                  await startTournament();
-                  await checkTourney();
-                }}>Start New Tournament</button>
-              </div>
-            ) : (
-              <div className="bracket-layout">
-                {/* LEFT SIDE: Groups A, C, E, G, I, K */}
-                {renderBracketSide(['A','C','E','G','I','K'], [0,2,4,6,8,10,12,14], [0,2,4,6], [0,2], 0)}
+        {/* Result phase */}
+        {phase === 'result' && (
+          <ResultPanel
+            result={result}
+            teamA={teamA}
+            teamB={teamB}
+            onReset={handleReset}
+          />
+        )}
 
-                {/* CENTRE: Final */}
-                <div className="bracket-col col-final">
-                  <div className="trophy-icon">🏆</div>
-                  {renderSlot('final', 0)}
-                  <div className="final-label">WORLD CHAMPION</div>
-                </div>
+        {/* Setup phase */}
+        {phase === 'setup' && (
+          <>
+            {error && <div className="error-banner">{error}</div>}
 
-                {/* RIGHT SIDE: Groups B, D, F, H, J, L */}
-                {renderBracketSide(['B','D','F','H','J','L'], [1,3,5,7,9,11,13,15], [1,3,5,7], [1,3], 1)}
+            <div className="tactics-layout">
+              <TeamSetupPanel
+                side="A"
+                teamName={teamA}
+                setTeamName={setTeamA}
+                teamNames={teamNames}
+                squad={getSquad(teamA)}
+                lineup={lineupA}
+                setLineup={setLineupA}
+              />
+
+              {/* Centre column */}
+              <div className="tactics-centre">
+                <button
+                  className={`btn-run-sim ${canRun ? 'active' : 'disabled'}`}
+                  onClick={handleRunPrediction}
+                  disabled={!canRun}
+                >
+                  {canRun ? (
+                    <>
+                      <span className="brs-icon">▶</span>
+                      <span>RUN PREDICTION</span>
+                    </>
+                  ) : (
+                    <span>Complete Both Lineups</span>
+                  )}
+                </button>
+
+
               </div>
-            )}
-          </div>
+
+              <TeamSetupPanel
+                side="B"
+                teamName={teamB}
+                setTeamName={setTeamB}
+                teamNames={teamNames}
+                squad={getSquad(teamB)}
+                lineup={lineupB}
+                setLineup={setLineupB}
+              />
+            </div>
+          </>
         )}
       </div>
     </main>
