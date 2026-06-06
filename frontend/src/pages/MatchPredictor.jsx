@@ -73,7 +73,7 @@ function computeRatingFromLineup(lineup) {
     const vals = arr.map(p => p ? p.overall : 0).filter(Boolean);
     if (!vals.length) return 0;
     const min = Math.min(...vals);
-    const weights = vals.map(v => Math.exp(0.15 * (v - min)));
+    const weights = vals.map(v => Math.exp(0.05 * (v - min)));
     const wSum = weights.reduce((a, b) => a + b, 0);
     return vals.reduce((sum, v, i) => sum + v * weights[i], 0) / wSum;
   };
@@ -699,7 +699,7 @@ export default function MatchPredictor() {
       // Scale probabilities by rating delta
       const deltaA = (ratingA.overall - baseA.overall) / 100;
       const deltaB = (ratingB.overall - baseB.overall) / 100;
-      const shift = (deltaA - deltaB) * 4.5; // significantly increased sensitivity factor
+      const shift = (deltaA - deltaB) * 7.5; // significantly increased sensitivity factor
 
       let hWin = Math.max(0.03, Math.min(0.95, raw.win_pct_home + shift));
       let aWin = Math.max(0.03, Math.min(0.95, raw.win_pct_away - shift));
@@ -712,11 +712,11 @@ export default function MatchPredictor() {
       // Adjust goals
       const atkShiftA = (ratingA.attack - baseA.attack) / 100;
       const defShiftB = (ratingB.defense - baseB.defense) / 100;
-      const goalsHome = Math.max(0.1, raw.avg_goals_home + (atkShiftA - defShiftB) * 8.0);
+      const goalsHome = Math.max(0.1, raw.avg_goals_home + (atkShiftA - defShiftB) * 12.0);
 
       const atkShiftB = (ratingB.attack - baseB.attack) / 100;
       const defShiftA = (ratingA.defense - baseA.defense) / 100;
-      const goalsAway = Math.max(0.1, raw.avg_goals_away + (atkShiftB - defShiftA) * 8.0);
+      const goalsAway = Math.max(0.1, raw.avg_goals_away + (atkShiftB - defShiftA) * 12.0);
       
       const newMostCommon = `${Math.round(goalsHome)}-${Math.round(goalsAway)}`;
       

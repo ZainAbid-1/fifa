@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   startTournament, getTournamentState, simulateStage,
   injurePlayer, restorePlayer, getSquads,
@@ -21,7 +21,6 @@ const STAGE_LABELS = {
 
 const STAGE_ORDER = ['group_stage', 'r32', 'r16', 'qf', 'sf', 'final', 'finished'];
 
-// WC 2026 date → stage mapping (approximate)
 const DATE_TO_STAGE = {
   group_stage: { start: '2026-06-11', end: '2026-07-02' },
   r32: { start: '2026-07-03', end: '2026-07-06' },
@@ -31,6 +30,19 @@ const DATE_TO_STAGE = {
   final: { start: '2026-07-19', end: '2026-07-20' },
 };
 
+// Calendar config — June + July 2026
+const CALENDAR_MONTHS = [
+  { year: 2026, month: 5 },  // June (0-indexed)
+  { year: 2026, month: 6 },  // July
+];
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+const DAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDate(d) {
@@ -39,6 +51,18 @@ function formatDate(d) {
 
 function parseDate(s) {
   return new Date(s + 'T00:00:00');
+}
+
+function isoDate(year, month, day) {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function stageForDate(dateStr) {
+  const d = parseDate(dateStr);
+  for (const [stage, range] of Object.entries(DATE_TO_STAGE)) {
+    if (d >= parseDate(range.start) && d <= parseDate(range.end)) return stage;
+  }
+  return null;
 }
 
 function stagesInRange(start, end) {
@@ -51,6 +75,67 @@ function stagesInRange(start, end) {
       return rs <= e && re >= s;
     })
     .map(([stage]) => stage);
+}
+
+/**
+ * Build a flat map: dateString → [matchObjects]
+ * Works from allFixtures (group fixtures API) or state.fixtures
+ */
+function buildDateFixtureMap(allFixtures, state) {
+  const map = {};
+
+  const addMatch = (m, fallbackStage) => {
+    const dateKey = m.date || null;
+    if (!dateKey) return;
+    if (!map[dateKey]) map[dateKey] = [];
+    map[dateKey].push({
+      home: m.home,
+      away: m.away,
+      venue: m.venue || '',
+      stage: m.stage || fallbackStage || stageForDate(dateKey) || 'group_stage',
+      id: m.id,
+      played: !!m.played,
+    });
+  };
+
+  if (allFixtures) {
+    const list = allFixtures.fixtures || allFixtures;
+    if (Array.isArray(list)) list.forEach(m => addMatch(m, 'group_stage'));
+  }
+
+  if (state?.fixtures) {
+    Object.entries(state.fixtures).forEach(([stageKey, matches]) => {
+      (matches || []).forEach(m => addMatch(m, stageKey));
+    });
+  }
+
+  return map;
+}
+
+/**
+ * Build calendar grid for a given year/month.
+ * Returns array of 6 rows × 7 cols — each cell: { day, dateStr } or null
+ */
+function buildMonthGrid(year, month) {
+  const firstDay = new Date(year, month, 1);
+  // JS: 0=Sun … 6=Sat → we want Mon=0
+  const startDow = (firstDay.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const cells = [];
+  let day = 1 - startDow;
+  for (let row = 0; row < 6; row++) {
+    const rowCells = [];
+    for (let col = 0; col < 7; col++, day++) {
+      if (day < 1 || day > daysInMonth) {
+        rowCells.push(null);
+      } else {
+        rowCells.push({ day, dateStr: isoDate(year, month, day) });
+      }
+    }
+    cells.push(rowCells);
+  }
+  return cells;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -194,92 +279,212 @@ function InjuryManager({ squads, onToggle, busy }) {
   );
 }
 
-// ─── Calendar Control Center ──────────────────────────────────────────────────
+// ─── Bracket Tree ─────────────────────────────────────────────────────────────
 
-function CalendarControl({ onAdvance, busy, currentStage }) {
-  const defaultStart = '2026-06-11';
-  const defaultEnd = '2026-06-14';
-  const [start, setStart] = useState(defaultStart);
-  const [end, setEnd] = useState(defaultEnd);
+function BracketView({ fixtures, stage }) {
+  const [activeRound, setActiveRound] = useState('r32');
+  const koStages = ['r32', 'r16', 'qf', 'sf', 'final'];
 
-  const stages = stagesInRange(start, end);
+  const availableStages = koStages.filter(s => (fixtures[s] || []).length > 0);
+
+  if (availableStages.length === 0) {
+    return <div className="mm-empty">Complete the group stage to unlock the bracket.</div>;
+  }
 
   return (
-    <div className="mm-calendar-card">
-      <div className="mm-calendar-header">
-        <div className="mm-calendar-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="3" y="4" width="18" height="18" rx="2" />
-            <line x1="3" y1="9" x2="21" y2="9" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="16" y1="2" x2="16" y2="6" />
-          </svg>
-        </div>
-        <div>
-          <h3 className="mm-calendar-title">Advance Calendar</h3>
-          <p className="mm-muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>
-            Select a date range to simulate all matches within that window.
-          </p>
-        </div>
+    <div className="mm-bracket-wrapper">
+      {/* Mobile stage switcher */}
+      <div className="mm-bracket-switcher">
+        {availableStages.map(s => (
+          <button
+            key={s}
+            className={`mm-bracket-tab ${activeRound === s ? 'mm-bracket-tab--active' : ''}`}
+            onClick={() => setActiveRound(s)}
+          >
+            {s.toUpperCase()}
+          </button>
+        ))}
       </div>
 
-      <div className="mm-calendar-fields">
-        <label className="mm-field-label">
-          <span>Start Date</span>
-          <input
-            type="date"
-            className="mm-date-input"
-            value={start}
-            min="2026-06-11"
-            max="2026-07-20"
-            onChange={e => setStart(e.target.value)}
-          />
-        </label>
-        <div className="mm-calendar-arrow">→</div>
-        <label className="mm-field-label">
-          <span>End Date</span>
-          <input
-            type="date"
-            className="mm-date-input"
-            value={end}
-            min={start}
-            max="2026-07-20"
-            onChange={e => setEnd(e.target.value)}
-          />
-        </label>
+      {/* Desktop: horizontal tree / Mobile: active round */}
+      <div className="mm-bracket-desktop">
+        {koStages.map(s => {
+          const matches = fixtures[s] || [];
+          if (!matches.length) return null;
+          return (
+            <div key={s} className="mm-bracket-col">
+              <div className="mm-bracket-col-label">{STAGE_LABELS[s]}</div>
+              <div className="mm-bracket-col-matches">
+                {matches.map(m => (
+                  <div key={m.id} className="mm-bracket-match">
+                    <div className={`mm-bracket-team ${m.winner === m.home ? 'mm-bracket-team--win' : ''}`}>
+                      <span className="mm-bracket-team-name">{m.home}</span>
+                      {m.played && <span className="mm-bracket-score">{m.home_goals}</span>}
+                    </div>
+                    <div className={`mm-bracket-team ${m.winner === m.away ? 'mm-bracket-team--win' : ''}`}>
+                      <span className="mm-bracket-team-name">{m.away}</span>
+                      {m.played && <span className="mm-bracket-score">{m.away_goals}</span>}
+                    </div>
+                    {!m.played && <div className="mm-bracket-pending">TBD</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {stages.length > 0 && (
-        <div className="mm-stage-tags">
-          {stages.map(s => (
-            <span key={s} className="mm-stage-tag">{STAGE_LABELS[s]}</span>
+      {/* Mobile: single round view */}
+      <div className="mm-bracket-mobile">
+        <h4 className="mm-section-sub">{STAGE_LABELS[activeRound]}</h4>
+        <div className="mm-ko-grid">
+          {(fixtures[activeRound] || []).map(m => (
+            <MatchCard key={m.id} match={m} />
           ))}
         </div>
-      )}
+      </div>
+    </div>
+  );
+}
 
-      <button
-        className="mm-btn mm-btn--advance"
-        onClick={() => onAdvance(start, end, stages)}
-        disabled={busy || stages.length === 0}
-      >
-        {busy ? (
-          <>
-            <span className="mm-spinner" />
-            Simulating…
-          </>
-        ) : (
-          <>
-            <span className="mm-advance-arrow">→</span>
-            ADVANCE TO DATE
-          </>
+// ─── Manager Mode Calendar Grid ───────────────────────────────────────────────
+
+function CalendarGrid({ dateFixtureMap, onSimulateDay, busyDate, currentStage }) {
+  const [monthIdx, setMonthIdx] = useState(0);
+  const { year, month } = CALENDAR_MONTHS[monthIdx];
+  const grid = useMemo(() => buildMonthGrid(year, month), [year, month]);
+  const today = formatDate(new Date());
+
+  const handleDayClick = (dateStr) => {
+    const matches = dateFixtureMap[dateStr];
+    if (!matches || matches.length === 0) return;
+    const unplayed = matches.filter(m => !m.played);
+    if (unplayed.length === 0) return;
+    onSimulateDay(dateStr, unplayed);
+  };
+
+  return (
+    <div className="mm-cal-wrapper">
+      {/* Month navigation header */}
+      <div className="mm-cal-nav">
+        <button
+          className="mm-cal-nav-btn"
+          onClick={() => setMonthIdx(i => Math.max(0, i - 1))}
+          disabled={monthIdx === 0}
+          aria-label="Previous month"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+
+        <div className="mm-cal-month-label">
+          <span className="mm-cal-month-name">{MONTH_NAMES[month]}</span>
+          <span className="mm-cal-month-year">{year}</span>
+        </div>
+
+        <button
+          className="mm-cal-nav-btn"
+          onClick={() => setMonthIdx(i => Math.min(CALENDAR_MONTHS.length - 1, i + 1))}
+          disabled={monthIdx === CALENDAR_MONTHS.length - 1}
+          aria-label="Next month"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Day-of-week headers */}
+      <div className="mm-cal-dow-row">
+        {DAY_HEADERS.map(d => (
+          <div key={d} className="mm-cal-dow">{d}</div>
+        ))}
+      </div>
+
+      {/* Calendar body */}
+      <div className="mm-cal-grid">
+        {grid.map((row, ri) =>
+          row.map((cell, ci) => {
+            if (!cell) {
+              return <div key={`empty-${ri}-${ci}`} className="mm-cal-cell mm-cal-cell--empty" />;
+            }
+
+            const { day, dateStr } = cell;
+            const matches = dateFixtureMap[dateStr] || [];
+            const unplayed = matches.filter(m => !m.played);
+            const played = matches.filter(m => m.played);
+            const hasMatches = matches.length > 0;
+            const isToday = dateStr === today;
+            const isBusy = busyDate === dateStr;
+            const isSimulated = hasMatches && unplayed.length === 0 && played.length > 0;
+            const stage = matches[0]?.stage;
+
+            return (
+              <button
+                key={dateStr}
+                className={[
+                  'mm-cal-cell',
+                  hasMatches ? 'mm-cal-cell--match' : '',
+                  unplayed.length === 0 && hasMatches ? 'mm-cal-cell--done' : '',
+                  isToday ? 'mm-cal-cell--today' : '',
+                  isBusy ? 'mm-cal-cell--busy' : '',
+                ].filter(Boolean).join(' ')}
+                onClick={() => handleDayClick(dateStr)}
+                disabled={isBusy || unplayed.length === 0}
+                title={hasMatches ? `${matches.length} match${matches.length > 1 ? 'es' : ''} — click to simulate` : undefined}
+              >
+                <span className="mm-cal-day-num">{day}</span>
+
+                {isBusy && (
+                  <div className="mm-cal-busy-ring" />
+                )}
+
+                {hasMatches && !isBusy && (
+                  <div className="mm-cal-match-info">
+                    {matches.slice(0, 2).map((m, i) => (
+                      <div key={i} className="mm-cal-match-pill">
+                        <span className="mm-cal-match-teams">
+                          {m.home.length > 3 ? m.home.slice(0, 3) : m.home}
+                          <span className="mm-cal-match-vs"> v </span>
+                          {m.away.length > 3 ? m.away.slice(0, 3) : m.away}
+                        </span>
+                      </div>
+                    ))}
+                    {matches.length > 2 && (
+                      <div className="mm-cal-match-more">+{matches.length - 2} more</div>
+                    )}
+                    {stage && (
+                      <div className="mm-cal-stage-label">
+                        {STAGE_LABELS[stage] || stage}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {isSimulated && !isBusy && (
+                  <div className="mm-cal-done-check">✓</div>
+                )}
+              </button>
+            );
+          })
         )}
-      </button>
+      </div>
 
-      {stages.length === 0 && (
-        <p className="mm-muted" style={{ fontSize: '0.75rem', textAlign: 'center' }}>
-          No tournament stages fall in this window.
-        </p>
-      )}
+      {/* Legend */}
+      <div className="mm-cal-legend">
+        <div className="mm-cal-legend-item">
+          <div className="mm-cal-legend-dot mm-cal-legend-dot--match" />
+          <span>Match Day</span>
+        </div>
+        <div className="mm-cal-legend-item">
+          <div className="mm-cal-legend-dot mm-cal-legend-dot--done" />
+          <span>Simulated</span>
+        </div>
+        <div className="mm-cal-legend-item mm-cal-legend-hint">
+          Click a match day to simulate
+        </div>
+      </div>
     </div>
   );
 }
@@ -301,20 +506,21 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
   const [done, setDone] = useState(false);
   const pausedRef = useRef(false);
   const completedRef = useRef(false);
+  const runningRef = useRef(false);
 
   const currentMatch = queue[idx] || null;
 
-  // Run simulation for current match
   useEffect(() => {
-    if (!currentMatch || paused) return;
-    if (done) return;
+    if (!currentMatch || paused || done) return;
+    // Guard against double-fires
+    if (runningRef.current) return;
+    runningRef.current = true;
 
     let cancelled = false;
     setPhase(PHASES.CALCULATING);
     setResult(null);
 
     async function run() {
-      // Calculating phase — 1.2s minimum for drama
       const calcStart = Date.now();
 
       let simResult = null;
@@ -327,25 +533,23 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
       }
 
       const elapsed = Date.now() - calcStart;
-      const wait = Math.max(0, 1400 - elapsed);
-      await new Promise(r => setTimeout(r, wait));
-
-      if (cancelled || pausedRef.current) return;
+      await new Promise(r => setTimeout(r, Math.max(0, 1400 - elapsed)));
+      if (cancelled || pausedRef.current) { runningRef.current = false; return; }
 
       setResult(simResult);
       setPhase(PHASES.REVEAL);
       await new Promise(r => setTimeout(r, 1000));
+      if (cancelled || pausedRef.current) { runningRef.current = false; return; }
 
-      if (cancelled || pausedRef.current) return;
       setPhase(PHASES.STATS);
       await new Promise(r => setTimeout(r, 3200));
+      if (cancelled || pausedRef.current) { runningRef.current = false; return; }
 
-      if (cancelled || pausedRef.current) return;
       setPhase(PHASES.EXIT);
       await new Promise(r => setTimeout(r, 400));
+      if (cancelled || pausedRef.current) { runningRef.current = false; return; }
 
-      if (cancelled || pausedRef.current) return;
-
+      runningRef.current = false;
       const nextIdx = idx + 1;
       if (nextIdx >= queue.length) {
         if (!completedRef.current) {
@@ -359,7 +563,7 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
     }
 
     run();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; runningRef.current = false; };
   }, [idx, paused, done]);
 
   function handlePause() {
@@ -370,15 +574,18 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
 
   if (!currentMatch) return null;
 
-  const homeProb = result?.home_win_pct ?? 40;
-  const drawProb = result?.draw_pct ?? 25;
-  const awayProb = result?.away_win_pct ?? 35;
-  const score = result?.most_common_score || '?–?';
-  const [homeGoals, awayGoals] = score.split('–');
+  // Use ONLY API data — no hardcoded fallbacks that would mislead
+  const homeProb = result?.home_win_pct ?? null;
+  const drawProb = result?.draw_pct ?? null;
+  const awayProb = result?.away_win_pct ?? null;
+  const hasProbs = homeProb !== null && drawProb !== null && awayProb !== null;
+
+  const score = result?.most_common_score || null;
+  const [homeGoals, awayGoals] = score ? score.split('–') : ['?', '?'];
 
   return (
     <div className={`mm-cinema ${phase === PHASES.EXIT ? 'mm-cinema--exit' : 'mm-cinema--enter'}`}>
-      {/* Background pulse rings */}
+      {/* Background */}
       <div className="mm-cinema-bg">
         <div className="mm-pulse-ring mm-pulse-ring--1" />
         <div className="mm-pulse-ring mm-pulse-ring--2" />
@@ -395,18 +602,16 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
         ))}
       </div>
 
-      {/* Pause button */}
+      {/* Pause */}
       <button className="mm-pause-btn" onClick={handlePause}>
         <span className="mm-pause-icon">⏸</span>
-        PAUSE
+        <span>PAUSE</span>
       </button>
 
-      {/* Match counter */}
-      <div className="mm-cinema-counter">
-        {idx + 1} / {queue.length}
-      </div>
+      {/* Counter */}
+      <div className="mm-cinema-counter">Match {idx + 1} / {queue.length}</div>
 
-      {/* Main content */}
+      {/* Content */}
       <div className={`mm-cinema-content mm-cinema-content--${phase}`}>
 
         {phase === PHASES.CALCULATING && (
@@ -415,9 +620,7 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
               <div className="mm-calc-ring mm-calc-ring--1" />
               <div className="mm-calc-ring mm-calc-ring--2" />
               <div className="mm-calc-ring mm-calc-ring--3" />
-              <div className="mm-calc-core">
-                <span>⚽</span>
-              </div>
+              <div className="mm-calc-core"><span>⚽</span></div>
             </div>
             <p className="mm-calc-label">CALCULATING</p>
             <div className="mm-calc-teams">
@@ -431,7 +634,7 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
 
         {(phase === PHASES.REVEAL || phase === PHASES.STATS || phase === PHASES.EXIT) && (
           <div className="mm-reveal-phase">
-            {/* Nation banners */}
+            {/* Nation banners with individual scores */}
             <div className="mm-nation-banners">
               <div className="mm-nation mm-nation--home">
                 <span className="mm-nation-name">{currentMatch.home}</span>
@@ -442,7 +645,7 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
 
               <div className="mm-vs-divider">
                 <div className="mm-vs-line" />
-                <span className="mm-vs-text">VS</span>
+                <span className="mm-vs-text">FT</span>
                 <div className="mm-vs-line" />
               </div>
 
@@ -454,32 +657,40 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
               </div>
             </div>
 
-            {/* Score explode — big central number */}
-            <div className={`mm-score-explode ${phase === PHASES.REVEAL ? 'mm-score-explode--pop' : 'mm-score-explode--settled'}`}>
-              <span className="mm-score-home">{homeGoals}</span>
-              <span className="mm-score-dash">–</span>
-              <span className="mm-score-away">{awayGoals}</span>
-            </div>
+            {/* Single central score — shown ONCE, large */}
+            {phase === PHASES.REVEAL && (
+              <div className="mm-score-explode mm-score-explode--pop">
+                <span className="mm-score-home">{homeGoals}</span>
+                <span className="mm-score-dash">–</span>
+                <span className="mm-score-away">{awayGoals}</span>
+              </div>
+            )}
 
-            {/* Stats bar (win probs) */}
+            {/* Stats bar — only shows from STATS phase onwards */}
             {(phase === PHASES.STATS || phase === PHASES.EXIT) && (
               <div className={`mm-stats-area ${phase === PHASES.STATS ? 'mm-stats-area--in' : ''}`}>
-                <div className="mm-prob-label-row">
-                  <span>{currentMatch.home}</span>
-                  <span>Draw</span>
-                  <span>{currentMatch.away}</span>
-                </div>
-                <div className="mm-prob-bar">
-                  <div className="mm-prob-seg mm-prob-seg--home" style={{ width: `${homeProb}%` }}>
-                    <span className="mm-prob-pct">{Math.round(homeProb)}%</span>
-                  </div>
-                  <div className="mm-prob-seg mm-prob-seg--draw" style={{ width: `${drawProb}%` }}>
-                    <span className="mm-prob-pct">{Math.round(drawProb)}%</span>
-                  </div>
-                  <div className="mm-prob-seg mm-prob-seg--away" style={{ width: `${awayProb}%` }}>
-                    <span className="mm-prob-pct">{Math.round(awayProb)}%</span>
-                  </div>
-                </div>
+                {hasProbs ? (
+                  <>
+                    <div className="mm-prob-label-row">
+                      <span>{currentMatch.home}</span>
+                      <span>Draw</span>
+                      <span>{currentMatch.away}</span>
+                    </div>
+                    <div className="mm-prob-bar">
+                      <div className="mm-prob-seg mm-prob-seg--home" style={{ width: `${homeProb}%` }}>
+                        <span className="mm-prob-pct">{Math.round(homeProb)}%</span>
+                      </div>
+                      <div className="mm-prob-seg mm-prob-seg--draw" style={{ width: `${drawProb}%` }}>
+                        <span className="mm-prob-pct">{Math.round(drawProb)}%</span>
+                      </div>
+                      <div className="mm-prob-seg mm-prob-seg--away" style={{ width: `${awayProb}%` }}>
+                        <span className="mm-prob-pct">{Math.round(awayProb)}%</span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="mm-sim-note">Probability data unavailable</div>
+                )}
                 <div className="mm-sim-note">Based on 5,000 Monte Carlo simulations</div>
                 {currentMatch.venue && (
                   <div className="mm-venue-note">{currentMatch.venue}</div>
@@ -499,14 +710,15 @@ export default function TournamentSimulator() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(false);
   const [simBusy, setSimBusy] = useState(false);
+  const [busyDate, setBusyDate] = useState(null);
   const [squads, setSquads] = useState([]);
   const [injBusy, setInjBusy] = useState(null);
   const [error, setError] = useState(null);
-  const [tab, setTab] = useState('advance');
-  const [cinema, setCinema] = useState(null);   // null | { queue: [] }
+  const [tab, setTab] = useState('calendar');
+  const [cinema, setCinema] = useState(null);
   const [allFixtures, setAllFixtures] = useState(null);
 
-  // ── Boot ────────────────────────────────────────────────────────────────────
+  // ── Boot ─────────────────────────────────────────────────────────────────────
   useEffect(() => {
     setLoading(true);
     Promise.all([
@@ -520,10 +732,22 @@ export default function TournamentSimulator() {
     }).finally(() => setLoading(false));
   }, []);
 
-  const refreshState = useCallback(() =>
-    getTournamentState().then(setState).catch(console.error), []);
+  const refreshState = useCallback(async () => {
+    const [st, sq] = await Promise.all([
+      getTournamentState().catch(() => null),
+      getSquads().catch(() => null),
+    ]);
+    if (st) setState(st);
+    if (sq) setSquads(sq.teams || []);
+  }, []);
 
-  // ── Start tournament ────────────────────────────────────────────────────────
+  // ── Date-fixture map (memoised) ───────────────────────────────────────────────
+  const dateFixtureMap = useMemo(
+    () => buildDateFixtureMap(allFixtures, state),
+    [allFixtures, state]
+  );
+
+  // ── Start tournament ─────────────────────────────────────────────────────────
   async function handleStart() {
     setSimBusy(true); setError(null);
     try {
@@ -538,60 +762,41 @@ export default function TournamentSimulator() {
     finally { setSimBusy(false); }
   }
 
-  // ── Advance to date range ────────────────────────────────────────────────────
-  async function handleAdvance(start, end, stages) {
+  // ── Simulate a single day from calendar click ─────────────────────────────────
+  async function handleSimulateDay(dateStr, unplayedMatches) {
     setError(null);
 
-    // If tournament not started, auto-start first
     if (!state || state.stage === 'not_started') {
       setSimBusy(true);
       try {
         await startTournament();
-        await refreshState();
+        const [st, fx] = await Promise.all([
+          getTournamentState(),
+          getGroupFixtures().catch(() => null),
+        ]);
+        setState(st);
+        if (fx) setAllFixtures(fx);
       } catch (e) { setError(e.message); setSimBusy(false); return; }
       setSimBusy(false);
     }
 
-    // Build queue of matches in the date window
-    let queue = [];
+    const queue = unplayedMatches.map(m => ({
+      home: m.home,
+      away: m.away,
+      venue: m.venue || '',
+      stage: m.stage,
+    }));
 
-    if (allFixtures) {
-      // Use group fixtures API data if available
-      const startDate = parseDate(start);
-      const endDate = parseDate(end);
-      queue = (allFixtures.fixtures || allFixtures || []).filter(m => {
-        if (!m.date) return stages.includes('group_stage');
-        const d = parseDate(m.date);
-        return d >= startDate && d <= endDate;
-      }).map(m => ({ home: m.home, away: m.away, venue: m.venue || '', date: m.date || '' }));
-    }
-
-    // Fallback: build queue from tournament state fixtures
-    if (queue.length === 0 && state?.fixtures) {
-      stages.forEach(s => {
-        const stageMatches = (state.fixtures[s] || []).filter(m => !m.played);
-        stageMatches.forEach(m => {
-          queue.push({ home: m.home, away: m.away, venue: m.venue || '', id: m.id });
-        });
-      });
-    }
-
-    if (queue.length === 0) {
-      setError('No unplayed matches found in this date range. Try advancing the tournament stage first.');
-      return;
-    }
-
-    // Launch cinematic overlay
-    setCinema({ queue });
+    setBusyDate(dateStr);
+    setCinema({ queue, date: dateStr });
   }
 
-  // ── Cinema complete ─────────────────────────────────────────────────────────
+  // ── Cinema complete ───────────────────────────────────────────────────────────
   async function handleCinemaComplete() {
     setCinema(null);
-    // After cinema finishes all matches shown, simulate the actual stage(s) on backend
+    setBusyDate(null);
     setSimBusy(true);
     try {
-      // Simulate each pending stage
       const st = await getTournamentState();
       if (st && st.stage !== 'not_started' && st.stage !== 'finished') {
         await simulateStage();
@@ -601,13 +806,15 @@ export default function TournamentSimulator() {
     finally { setSimBusy(false); }
   }
 
-  // ── Cinema pause ────────────────────────────────────────────────────────────
+  // ── Cinema pause — go back to UI, let user visit Squad tab ────────────────────
   function handleCinemaPause() {
     setCinema(null);
+    setBusyDate(null);
+    setTab('injuries');
     refreshState();
   }
 
-  // ── Injury toggle ────────────────────────────────────────────────────────────
+  // ── Injury toggle ─────────────────────────────────────────────────────────────
   async function handleToggleInjury(team, player) {
     setInjBusy(player.name);
     try {
@@ -627,19 +834,16 @@ export default function TournamentSimulator() {
     finally { setInjBusy(null); }
   }
 
-  // ── Derived ──────────────────────────────────────────────────────────────────
+  // ── Derived ───────────────────────────────────────────────────────────────────
   const stage = state?.stage || 'not_started';
   const canStart = stage === 'not_started' || stage === 'finished';
   const standings = state?.standings || {};
   const fixtures = state?.fixtures || {};
   const groups = Object.keys(standings).sort();
-  const koHistory = ['r32', 'r16', 'qf', 'sf', 'final']
-    .flatMap(s => (fixtures[s] || []).filter(m => m.played));
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <main className="mm-page">
-      {/* Cinematic overlay — rendered above everything */}
       {cinema && (
         <CinematicOverlay
           queue={cinema.queue}
@@ -648,7 +852,7 @@ export default function TournamentSimulator() {
         />
       )}
 
-      {/* Page header */}
+      {/* Header */}
       <div className="mm-header">
         <div className="mm-header-inner">
           <div className="mm-eyebrow">
@@ -662,7 +866,7 @@ export default function TournamentSimulator() {
 
       <div className="mm-container">
 
-        {/* Stage progress track */}
+        {/* Stage progress */}
         <div className="mm-progress-card">
           <div className="mm-progress-track">
             {STAGE_ORDER.slice(0, -1).map(s => (
@@ -677,7 +881,7 @@ export default function TournamentSimulator() {
           )}
         </div>
 
-        {/* Quick actions row */}
+        {/* Quick actions */}
         <div className="mm-quick-actions">
           <button
             className="mm-btn mm-btn--start"
@@ -704,10 +908,10 @@ export default function TournamentSimulator() {
           </div>
         )}
 
-        {/* Tab nav */}
+        {/* Tabs */}
         <div className="mm-tabs">
           {[
-            { id: 'advance', label: 'Advance' },
+            { id: 'calendar', label: '📅 Calendar' },
             { id: 'groups', label: 'Standings' },
             { id: 'bracket', label: 'Bracket' },
             { id: 'injuries', label: 'Squad' },
@@ -722,16 +926,10 @@ export default function TournamentSimulator() {
           ))}
         </div>
 
-        {/* ── Tab: Advance ── */}
-        {tab === 'advance' && (
+        {/* ── Calendar ── */}
+        {tab === 'calendar' && (
           <div className="mm-tab-pane mm-anim-in">
-            <CalendarControl
-              onAdvance={handleAdvance}
-              busy={simBusy}
-              currentStage={stage}
-            />
-
-            {stage === 'finished' && (
+            {stage === 'finished' ? (
               <div className="mm-trophy-screen">
                 <div className="mm-trophy-glow">
                   <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="#c8f000" strokeWidth="1.5">
@@ -745,15 +943,28 @@ export default function TournamentSimulator() {
                 </div>
                 <h2 className="mm-champion-hero">{state.champion}</h2>
                 <p className="mm-muted">2026 FIFA World Cup Champions</p>
-                <button className="mm-btn mm-btn--advance mm-mt-24" onClick={handleStart}>
+                <button className="mm-btn mm-btn--advance mm-mt-24" style={{ maxWidth: 260, margin: '24px auto 0' }} onClick={handleStart}>
                   Simulate Again
                 </button>
               </div>
+            ) : (
+              <>
+                <div className="mm-cal-hint">
+                  <span className="mm-cal-hint-icon">⚽</span>
+                  <span>Click any <strong>red match day</strong> on the calendar to launch the cinematic simulation for that day's fixtures.</span>
+                </div>
+                <CalendarGrid
+                  dateFixtureMap={dateFixtureMap}
+                  onSimulateDay={handleSimulateDay}
+                  busyDate={busyDate}
+                  currentStage={stage}
+                />
+              </>
             )}
           </div>
         )}
 
-        {/* ── Tab: Group Standings ── */}
+        {/* ── Standings ── */}
         {tab === 'groups' && (
           <div className="mm-tab-pane mm-anim-in">
             {groups.length === 0 ? (
@@ -768,63 +979,21 @@ export default function TournamentSimulator() {
           </div>
         )}
 
-        {/* ── Tab: Bracket / KO ── */}
+        {/* ── Bracket ── */}
         {tab === 'bracket' && (
           <div className="mm-tab-pane mm-anim-in">
-            {/* Current stage upcoming */}
-            {stage !== 'not_started' && stage !== 'group_stage' && stage !== 'finished' && (
-              <div className="mm-bracket-section">
-                <h3 className="mm-section-title">
-                  <span className="mm-section-dot" />
-                  {STAGE_LABELS[stage]} — Upcoming
-                </h3>
-                <div className="mm-ko-grid">
-                  {(fixtures[stage] || []).map(m => <MatchCard key={m.id} match={m} />)}
-                </div>
-              </div>
-            )}
-
-            {/* Group stage fixtures */}
-            {(stage === 'group_stage') && (
-              <div>
-                <h3 className="mm-section-title">Group Stage Fixtures</h3>
-                <div className="mm-fixtures-grid">
-                  {(fixtures.group_stage || []).map(m => <MatchCard key={m.id} match={m} small />)}
-                </div>
-              </div>
-            )}
-
-            {/* KO history */}
-            {koHistory.length > 0 && (
-              <div>
-                <h3 className="mm-section-title mm-mt-32">Results History</h3>
-                {['r32', 'r16', 'qf', 'sf', 'final'].map(s => {
-                  const played = (fixtures[s] || []).filter(m => m.played);
-                  if (!played.length) return null;
-                  return (
-                    <div key={s} className="mm-bracket-section">
-                      <h4 className="mm-section-sub">{STAGE_LABELS[s]}</h4>
-                      <div className="mm-ko-grid">
-                        {played.map(m => <MatchCard key={m.id} match={m} />)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {koHistory.length === 0 && stage === 'not_started' && (
-              <div className="mm-empty">Start the tournament to see bracket results.</div>
-            )}
-            {koHistory.length === 0 && stage === 'group_stage' && (
-              <div className="mm-empty">Complete the group stage to unlock the knockout bracket.</div>
-            )}
+            <BracketView fixtures={fixtures} stage={stage} />
           </div>
         )}
 
-        {/* ── Tab: Squad / Injuries ── */}
+        {/* ── Squad ── */}
         {tab === 'injuries' && (
           <div className="mm-tab-pane mm-anim-in">
+            {cinema === null && busyDate === null && (
+              <div className="mm-resume-hint">
+                <span>💡 After injuring players, switch back to the Calendar tab and click the same match day to simulate with updated ratings.</span>
+              </div>
+            )}
             <InjuryManager squads={squads} onToggle={handleToggleInjury} busy={injBusy} />
           </div>
         )}
