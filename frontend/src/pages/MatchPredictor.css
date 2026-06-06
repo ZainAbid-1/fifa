@@ -698,124 +698,219 @@
 
 /* ── Tunnel Screen ─────────────────────────────────────────────── */
 .tunnel-screen {
-  position: relative;
-  min-height: 600px;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  border: 1px solid var(--border);
+  background: var(--bg-dark);
+  animation: cinematicEnter 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+@keyframes cinematicEnter {
+  from { opacity: 0; transform: scale(1.05); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* ── Tunnel Background & Glows ───────────────────────────────────── */
 .tunnel-bg {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(ellipse at 50% 0%, rgba(247, 181, 0, 0.08) 0%, transparent 60%),
-    radial-gradient(ellipse at 50% 100%, rgba(0, 122, 204, 0.08) 0%, transparent 60%),
-    var(--bg-dark);
-  animation: tunnelPulse 2s ease-in-out infinite alternate;
+  background: var(--bg-dark);
+  overflow: hidden;
 }
 
-@keyframes tunnelPulse {
-  from {
-    opacity: 0.8;
-  }
-
-  to {
-    opacity: 1;
-  }
+.tunnel-glow {
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.15;
+  animation: tunnelSway 8s ease-in-out infinite alternate;
 }
 
+.tunnel-glow-a {
+  top: -200px;
+  left: -200px;
+  background: #64c8ff;
+}
+
+.tunnel-glow-b {
+  bottom: -200px;
+  right: -200px;
+  background: #e5001b;
+  animation-delay: -4s;
+}
+
+@keyframes tunnelSway {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(50px, 50px) scale(1.1); }
+}
+
+/* ── Tunnel Content ────────────────────────────────────────────── */
 .tunnel-content {
   position: relative;
   z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 48px;
+  justify-content: center;
+  gap: 64px;
   width: 100%;
-  max-width: 560px;
-  padding: 40px 24px;
+  max-width: 800px;
+  padding: 40px;
   text-align: center;
 }
 
 .tunnel-vs {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 32px;
 }
 
 .tunnel-team-a,
 .tunnel-team-b {
   font-family: var(--font-display);
-  font-size: 2rem;
+  font-size: 4rem;
   font-weight: 900;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  text-shadow: 0 4px 24px rgba(0,0,0,0.8);
+  animation: slideInTeam 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  color: #fff;
 }
 
-.tunnel-team-a {
-  color: var(--mm-blue, #64c8ff);
-}
-
-.tunnel-team-b {
-  color: var(--mm-red, #e5001b);
+@keyframes slideInTeam {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .tunnel-vs-badge {
   font-family: var(--font-sub);
-  font-size: 0.9rem;
-  font-weight: 800;
-  letter-spacing: 0.2em;
-  color: var(--text-muted);
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: 0.3em;
+  color: var(--gold);
+  padding: 12px 24px;
+  border: 2px solid var(--gold);
+  border-radius: 8px;
+  background: rgba(247, 181, 0, 0.1);
+  box-shadow: 0 0 20px rgba(247, 181, 0, 0.3);
+  animation: pulseVS 2s infinite;
 }
 
-.tunnel-log {
+@keyframes pulseVS {
+  0% { transform: scale(1); box-shadow: 0 0 20px rgba(247, 181, 0, 0.3); }
+  50% { transform: scale(1.1); box-shadow: 0 0 40px rgba(247, 181, 0, 0.6); }
+  100% { transform: scale(1); box-shadow: 0 0 20px rgba(247, 181, 0, 0.3); }
+}
+
+/* ── Tunnel Spinner ────────────────────────────────────────────── */
+.tunnel-spinner {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 40px 0;
+  animation: zoomPulse 3s ease-in-out infinite;
+}
+
+@keyframes zoomPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.ts-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: var(--gold);
+  border-bottom-color: rgba(247, 181, 0, 0.2);
+  box-shadow: 0 0 15px rgba(247, 181, 0, 0.2);
+}
+
+.ts-ring-1 {
+  width: 100%;
+  height: 100%;
+  animation: spin 2s linear infinite;
+}
+
+.ts-ring-2 {
+  width: 80%;
+  height: 80%;
+  border-top-color: rgba(255, 255, 255, 0.5);
+  border-bottom-color: transparent;
+  animation: spin 3s linear infinite reverse;
+}
+
+.ts-ring-3 {
+  width: 60%;
+  height: 60%;
+  border-top-color: var(--gold);
+  border-bottom-color: var(--gold);
+  opacity: 0.5;
+  animation: spin 1.5s linear infinite;
+}
+
+.ts-core {
+  font-size: 2.5rem;
+  animation: pulse 1s ease-in-out infinite alternate;
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
+}
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+@keyframes pulse {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  100% { transform: scale(1.1); opacity: 1; }
+}
+
+/* ── Tunnel Status ─────────────────────────────────────────────── */
+.tunnel-status {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  gap: 16px;
   width: 100%;
 }
 
-.tunnel-log-line {
-  font-family: var(--font-sub);
-  font-size: 0.85rem;
-  letter-spacing: 0.08em;
-  padding: 8px 16px;
-  border-radius: 4px;
-  transition: all 0.3s;
-  text-align: left;
+.ts-text {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  color: #fff;
+  text-transform: uppercase;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+  animation: textGlitch 0.4s ease;
 }
 
-.tunnel-log-line.done {
-  color: var(--text-muted);
-  background: transparent;
+@keyframes textGlitch {
+  0% { opacity: 0; filter: blur(10px) brightness(2); transform: scale(1.1); }
+  100% { opacity: 1; filter: blur(0) brightness(1); transform: scale(1); }
 }
 
-.tunnel-log-line.active {
-  color: var(--gold);
-  background: rgba(247, 181, 0, 0.08);
-  border-left: 2px solid var(--gold);
-}
-
-.tunnel-progress {
+.ts-bar-track {
   width: 100%;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.08);
+  max-width: 600px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.15);
   border-radius: 99px;
   overflow: hidden;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.8);
 }
 
-.tunnel-progress-fill {
+.ts-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--gold), #f7b500);
+  background: linear-gradient(90deg, #f7b500, #ffe169);
   border-radius: 99px;
-  transition: width 0.4s ease;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 10px rgba(247, 181, 0, 0.5);
 }
 
 /* ── Result Panel ──────────────────────────────────────────────── */

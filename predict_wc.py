@@ -565,41 +565,85 @@ def penalty_win_prob(home: str, away: str, ea_df: pd.DataFrame) -> float:
 # FAST MATCH SAMPLER
 # =============================================================================
 
+"""
+PATCH — sample_match fix for score distribution.
+
+Replace the sample_match and sample_extra_time functions in predict_wc.py
+with these versions. The key changes:
+
+  1. Raise the MINIMUM expected-goals floor from 0.3 → 1.0 so Poisson actually
+     produces varied scores (0-0, 1-0, 2-1, 3-1, etc.) instead of almost-always 0.
+  2. Add a small random "volatility" jitter so mismatched games still occasionally
+     produce high-scoring results.
+  3. The fallback (when 30 Poisson draws don't match the outcome model) now picks
+     a score sampled from a realistic WC distribution rather than always 1-0.
+  4. Clip ceiling stays at 8 to cap unrealistic blowouts.
+"""
+
+import numpy as np
+
+# Realistic WC final-score distributions for each outcome,
+# used as the fallback when Poisson sampling doesn't converge.
+# Format: (home_goals, away_goals) tuples with approximate frequency weights.
+_FALLBACK_H = [(1,0),(2,0),(2,1),(3,0),(3,1),(3,2),(1,0),(2,1)]   # home win
+_FALLBACK_D = [(0,0),(1,1),(2,2),(1,1),(0,0),(2,2),(1,1),(3,3)]   # draw
+_FALLBACK_A = [(0,1),(0,2),(1,2),(0,3),(1,3),(2,3),(0,1),(1,2)]   # away win
+
+_FALLBACK = {"H": _FALLBACK_H, "D": _FALLBACK_D, "A": _FALLBACK_A}
+
+
 def sample_match(fd, rng):
     """
     fd: dict with p_H, p_D, p_A, exp_h, exp_a
     Returns (home_goals, away_goals)
+
+    Changes vs original:
+      - exp floor raised from 0.3 → 1.0  (avoids near-certain 0-goal Poisson draws)
+      - small volatility jitter ±0–0.4 goals added to each team
+      - fallback uses realistic WC score table instead of always 1-0
     """
     p = np.array([fd["p_A"], fd["p_D"], fd["p_H"]])
     p = p / p.sum()
     outcome_idx = rng.choice(3, p=p)
     outcome = ["A", "D", "H"][outcome_idx]
 
-    exp_h = max(0.3, float(fd["exp_h"]))
-    exp_a = max(0.3, float(fd["exp_a"]))
+    # ── Raise floor to 1.0 so Poisson draws actually produce goals ────────────
+    # Original clip: (0.3, 8)  → Poisson(0.3) gives P(0 goals) ≈ 74% → forced 1-0
+    # New clip:      (1.0, 8)  → Poisson(1.0) gives P(0 goals) ≈ 37%, P(1) ≈ 37%, P(2+) ≈ 26%
+    base_h = float(fd["exp_h"])
+    base_a = float(fd["exp_a"])
 
-    for _ in range(30):
+    # Small per-match volatility so mismatches still produce varied results
+    jitter_h = rng.uniform(0.0, 0.4)
+    jitter_a = rng.uniform(0.0, 0.4)
+
+    exp_h = float(np.clip(base_h + jitter_h, 1.0, 8.0))
+    exp_a = float(np.clip(base_a + jitter_a, 1.0, 8.0))
+
+    for _ in range(50):                          # more attempts (was 30)
         gh = int(rng.poisson(exp_h))
         ga = int(rng.poisson(exp_a))
         s  = "H" if gh > ga else ("A" if ga > gh else "D")
         if s == outcome:
             return gh, ga
 
-    if outcome == "H":   return (int(exp_h) + 1, int(exp_h))
-    elif outcome == "A": return (int(exp_a),     int(exp_a) + 1)
-    else:
-        v = (int(exp_h) + int(exp_a)) // 2
-        return v, v
+    # ── Fallback: sample from realistic WC score distribution ─────────────────
+    # Original fallback was: H→(2,1) D→(v,v) A→(1,2) — effectively always 1-0
+    choices = _FALLBACK[outcome]
+    pick = choices[int(rng.integers(len(choices)))]
+    return pick
 
 
 def sample_extra_time(fd, rng):
     """
-    Fix 4: Simulate 30 minutes of extra time.
+    Simulate 30 minutes of extra time.
     Goal rate is 40% of the 90-min rate (proportional to time + fatigue deflation).
     Returns (added_home_goals, added_away_goals).
+
+    Change: floor raised to 0.4 (was 0.1) to avoid zero-goal ET almost always.
     """
-    et_exp_h = max(0.1, float(fd["exp_h"]) * 0.40)
-    et_exp_a = max(0.1, float(fd["exp_a"]) * 0.40)
+    et_exp_h = float(np.clip(float(fd["exp_h"]) * 0.40, 0.4, 3.0))
+    et_exp_a = float(np.clip(float(fd["exp_a"]) * 0.40, 0.4, 3.0))
     gh = int(rng.poisson(et_exp_h))
     ga = int(rng.poisson(et_exp_a))
     return gh, ga

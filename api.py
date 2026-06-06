@@ -242,147 +242,7 @@ def read_root():
     return {"status": "ok", "message": "World Cup 2026 API is running."}
 
 
-class PredictMatchRequest(BaseModel):
-    team_a: str
-    team_b: str
-    venue: Optional[str] = ""
 
-
-@app.post("/api/predict_match")
-def predict_match(req: PredictMatchRequest):
-    ko_lookup = app_state["ko_lookup"]
-    elo_map   = app_state["elo_map"]
-    ea_df     = app_state["ea_df"]
-    teams_df  = app_state["teams_df"]
-
-    try:
-        # Check pre-computed first for group matches
-        fd = None
-        key = (req.team_a, req.team_b)
-        if key in ko_lookup:
-            fd = ko_lookup[key]
-
-        if not fd:
-            # Build full feature row for KO / unknown match
-            row_dict = feature_engineering.build_match_row(
-                req.team_a, req.team_b, "2026-06-11", True, "FIFA World Cup",
-                app_state["fe_elo_lookup"], app_state["fe_form_df"],
-                app_state["fe_h2h"], app_state["fe_static"]
-            )
-            row_features = row_dict_to_features(
-                row_dict, app_state["feature_cols"], app_state["wc_medians"])
-            row_np = np.array([row_features], dtype=np.float32)
-            
-            # Apply altitude to the full row
-            if req.venue:
-                row_np[0] = predict_wc.apply_altitude_to_row(
-                    row_np[0], app_state["feature_cols"],
-                    req.venue, req.team_a, req.team_b, elo_map)
-
-            probs = app_state["om"].predict_proba(row_np)[0]
-            exp_h = float(np.clip(app_state["gh_model"].predict(row_np)[0], 0.3, 8))
-            exp_a = float(np.clip(app_state["ga_model"].predict(row_np)[0], 0.3, 8))
-            fd = {"p_H": probs[2], "p_D": probs[1], "p_A": probs[0], "exp_h": exp_h, "exp_a": exp_a}
-
-        elo_a = elo_map.get(req.team_a, 1500)
-        elo_b = elo_map.get(req.team_b, 1500)
-        elo_diff = abs(elo_a - elo_b)
-        underdog_prob = fd["p_A"] if elo_a > elo_b else fd["p_H"]
-        chaos_score = (elo_diff / 400.0) * underdog_prob * 100
-        is_trap_game = chaos_score > 15 and underdog_prob > 0.25
-
-        altitude_penalty = predict_wc.altitude_elo_penalty(req.venue)
-        context = {
-            "venue": req.venue,
-            "altitude_penalty": altitude_penalty,
-            "impact_message": (f"-{altitude_penalty*1.5:.1f} Elo penalty for visiting team"
-                               if altitude_penalty > 0 else "No altitude impact.")
-        }
-        penalty_prob_a = predict_wc.penalty_win_prob(req.team_a, req.team_b, ea_df)
-
-        return {
-            "team_a":       req.team_a,
-            "team_b":       req.team_b,
-            "win_prob_a":   float(fd["p_H"]),
-            "draw_prob":    float(fd["p_D"]),
-            "win_prob_b":   float(fd["p_A"]),
-            "chaos_potential": {"is_trap_game": is_trap_game, "score": round(chaos_score, 2)},
-            "context":      context,
-            "penalty_metrics": {
-                "clutch_factor_a": penalty_prob_a,
-                "clutch_factor_b": 1.0 - penalty_prob_a
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-class WhatIfRequest(BaseModel):
-    team_a: str
-    team_b: str
-    venue: Optional[str] = ""
-    adjustments: Dict[str, Dict[str, float]]
-
-
-@app.post("/api/what_if_predict")
-def what_if_predict(req: WhatIfRequest):
-    fe_static_copy = app_state["fe_static"].copy(deep=True)
-    for team, mods in req.adjustments.items():
-        for stat, change in mods.items():
-            if stat in fe_static_copy.columns:
-                mask = fe_static_copy["team"] == team
-                if mask.any():
-                    fe_static_copy.loc[mask, stat] += change
-                    if stat in ["ea_attack", "ea_defense", "ea_midfield"]:
-                        row = fe_static_copy.loc[mask]
-                        fe_static_copy.loc[mask, "ea_atk_def_ratio"] = (
-                            row["ea_attack"] / row["ea_defense"].replace(0, np.nan))
-                        fe_static_copy.loc[mask, "ea_balance"] = (
-                            row[["ea_attack", "ea_midfield", "ea_defense"]].std(axis=1))
-
-    match_mask = ((app_state["wc"]["home_team"] == req.team_a) &
-                  (app_state["wc"]["away_team"] == req.team_b))
-    if not match_mask.any():
-        match_mask = ((app_state["wc"]["home_team"] == req.team_b) &
-                      (app_state["wc"]["away_team"] == req.team_a))
-
-    date       = app_state["wc"][match_mask].iloc[0]["date"]       if match_mask.any() else "2026-06-11"
-    tournament = app_state["wc"][match_mask].iloc[0]["tournament"] if match_mask.any() else "FIFA World Cup"
-    neutral    = app_state["wc"][match_mask].iloc[0]["neutral"]    if match_mask.any() else True
-
-    row_dict = feature_engineering.build_match_row(
-        req.team_a, req.team_b, date, neutral, tournament,
-        app_state["fe_elo_lookup"], app_state["fe_form_df"],
-        app_state["fe_h2h"], fe_static_copy
-    )
-    row_features = row_dict_to_features(
-        row_dict, app_state["feature_cols"], app_state["wc_medians"])
-    row_np = np.array([row_features], dtype=np.float32)
-
-    elo_map_copy = app_state["elo_map"].copy()
-    if req.venue:
-        row_np[0] = predict_wc.apply_altitude_to_row(
-            row_np[0], app_state["feature_cols"],
-            req.venue, req.team_a, req.team_b, elo_map_copy)
-
-    probs = app_state["om"].predict_proba(row_np)[0]
-    return {
-        "team_a": req.team_a, "team_b": req.team_b,
-        "win_prob_a": float(probs[2]),
-        "draw_prob":  float(probs[1]),
-        "win_prob_b": float(probs[0])
-    }
-
-
-@app.get("/api/leaderboard")
-def leaderboard():
-    df = pd.read_csv("output/simulation_results.csv")
-    valid_ranks = df.dropna(subset=["world_ranking"]).copy()
-    valid_ranks["ai_rank"]    = valid_ranks["rank"]
-    valid_ranks["value_diff"] = valid_ranks["world_ranking"] - valid_ranks["ai_rank"]
-    sleepers = valid_ranks.sort_values("value_diff", ascending=False).head(10)
-    data = sleepers[["team", "ai_rank", "world_ranking", "value_diff", "p_winner"]].to_dict(orient="records")
-    return {"sleepers": data}
 
 
 # =============================================================================
@@ -616,13 +476,21 @@ def start_tournament(seed: Optional[int] = None):
     single_tournament["seed"] = selected_seed
     
     # Initialize Group Stage Fixtures
+    wc = app_state.get("wc")
     group_fixtures = []
     for idx, fd in enumerate(fixture_data):
+        # Resolve the match date from the wc dataframe
+        date_val = ""
+        if wc is not None:
+            mask = (wc["home_team"] == fd["home"]) & (wc["away_team"] == fd["away"])
+            if mask.any() and "date" in wc.columns:
+                date_val = str(wc[mask].iloc[0]["date"])
         group_fixtures.append({
             "id": f"group_{fd['group']}_{idx}",
             "home": fd["home"],
             "away": fd["away"],
             "group": fd["group"],
+            "date": date_val,
             "venue": f"{fd['city']}, {fd['country']}",
             "home_goals": None,
             "away_goals": None,
@@ -670,30 +538,73 @@ def get_tournament_state():
     return single_tournament
 
 
-@app.post("/api/tournament/simulate_stage")
-def simulate_stage():
-    """Simulate matches for the current stage and progress the tournament to the next stage."""
+class SimulateDayRequest(BaseModel):
+    match_ids: List[str]
+
+@app.post("/api/tournament/simulate_day")
+def simulate_day(req: SimulateDayRequest):
     stage = single_tournament["stage"]
-    if stage == "not_started":
-        raise HTTPException(status_code=400, detail="Tournament not started. Call /api/tournament/start first.")
-    if stage == "finished":
-        return {"status": "finished", "message": "Tournament is already finished.", "champion": single_tournament["champion"]}
-        
-    if "teams_df" not in app_state or "fixture_data" not in app_state:
-        raise HTTPException(status_code=503, detail="API models/data not fully loaded yet.")
+    if stage == "not_started" or stage == "finished":
+        raise HTTPException(status_code=400, detail="Tournament not started.")
 
     rng = np.random.default_rng(single_tournament["seed"])
     live_ea_df = ratings_to_df(app_state["computed_ratings"])
     
+    fixtures = single_tournament["fixtures"][stage]
+    fixture_data = app_state.get("fixture_data", [])
+    fd_map = {(fd["home"], fd["away"]): fd for fd in fixture_data}
+    
+    form_tracker = predict_wc.FormTracker()
+    for s in ["group_stage", "r32", "r16", "qf", "sf"]:
+        if s in single_tournament["fixtures"]:
+            for m in single_tournament["fixtures"][s]:
+                if m.get("played"):
+                    form_tracker.update(m["home"], m["away"], m["home_goals"], m["away_goals"])
+
+    for m in fixtures:
+        if m["id"] in req.match_ids and not m["played"]:
+            if stage == "group_stage":
+                key = (m["home"], m["away"])
+                fd = fd_map.get(key)
+                if not fd:
+                    fd = fd_map.get((m["away"], m["home"]))
+                    if fd:
+                        fd = {"p_H": fd["p_A"], "p_D": fd["p_D"], "p_A": fd["p_H"], "exp_h": fd["exp_a"], "exp_a": fd["exp_h"]}
+                if not fd:
+                    fd = {"p_H": 0.45, "p_D": 0.25, "p_A": 0.30, "exp_h": 1.5, "exp_a": 1.2}
+                    
+                gh, ga = predict_wc.sample_match(fd, rng)
+                m["home_goals"] = int(gh)
+                m["away_goals"] = int(ga)
+                m["played"] = True
+                
+                if gh > ga:
+                    m["winner"] = m["home"]
+                    m["win_reason"] = "90m"
+                elif ga > gh:
+                    m["winner"] = m["away"]
+                    m["win_reason"] = "90m"
+                else:
+                    m["winner"] = None
+                    m["win_reason"] = "90m"
+            else:
+                res = sample_ko_match_detailed(m["home"], m["away"], form_tracker, rng, live_ea_df)
+                m.update({
+                    "home_goals": int(res["home_goals"]),
+                    "away_goals": int(res["away_goals"]),
+                    "played": True,
+                    "winner": res["winner"],
+                    "win_reason": res["win_reason"],
+                    "extra_time": res["extra_time"],
+                    "penalties": res["penalties"],
+                    "pen_winner": res["pen_winner"],
+                    "pen_home_score": int(res["pen_home_score"]),
+                    "pen_away_score": int(res["pen_away_score"])
+                })
+
+    single_tournament["seed"] = int(single_tournament["seed"] * 31 + 17) % 1000000
+
     if stage == "group_stage":
-        # Simulate all 72 Group Matches
-        fixtures = single_tournament["fixtures"]["group_stage"]
-        fixture_data = app_state["fixture_data"]
-        
-        # Build mapping for quick probability lookup
-        fd_map = {(fd["home"], fd["away"]): fd for fd in fixture_data}
-        
-        # Reset standings tracker
         pts = defaultdict(int)
         gf = defaultdict(int)
         gd = defaultdict(int)
@@ -703,62 +614,35 @@ def simulate_stage():
         played = defaultdict(int)
         
         for m in fixtures:
-            # Look up fixture data
-            key = (m["home"], m["away"])
-            fd = fd_map.get(key)
-            if not fd:
-                # Reverse lookup
-                fd = fd_map.get((m["away"], m["home"]))
-                if fd:
-                    fd = {
-                        "p_H": fd["p_A"], "p_D": fd["p_D"], "p_A": fd["p_H"],
-                        "exp_h": fd["exp_a"], "exp_a": fd["exp_h"]
-                    }
-                    
-            if not fd:
-                # Fallback if not found (shouldn't happen)
-                fd = {"p_H": 0.45, "p_D": 0.25, "p_A": 0.30, "exp_h": 1.5, "exp_a": 1.2}
-                
-            gh, ga = predict_wc.sample_match(fd, rng)
-            m["home_goals"] = int(gh)
-            m["away_goals"] = int(ga)
-            m["played"] = True
-            
-            played[m["home"]] += 1
-            played[m["away"]] += 1
-            gf[m["home"]] += gh
-            gf[m["away"]] += ga
-            gd[m["home"]] += (gh - ga)
-            gd[m["away"]] += (ga - gh)
-            
-            if gh > ga:
-                m["winner"] = m["home"]
-                m["win_reason"] = "90m"
-                pts[m["home"]] += 3
-                won[m["home"]] += 1
-                lost[m["away"]] += 1
-            elif ga > gh:
-                m["winner"] = m["away"]
-                m["win_reason"] = "90m"
-                pts[m["away"]] += 3
-                won[m["away"]] += 1
-                lost[m["home"]] += 1
-            else:
-                m["winner"] = None
-                m["win_reason"] = "90m"
-                pts[m["home"]] += 1
-                pts[m["away"]] += 1
-                drawn[m["home"]] += 1
-                drawn[m["away"]] += 1
-                
-        # Re-compute and sort standings for each group
-        teams_df = app_state["teams_df"]
+            if m.get("played"):
+                t1 = m["home"]
+                t2 = m["away"]
+                gh = m["home_goals"]
+                ga = m["away_goals"]
+                played[t1] += 1
+                played[t2] += 1
+                gf[t1] += gh
+                gf[t2] += ga
+                gd[t1] += (gh - ga)
+                gd[t2] += (ga - gh)
+                if gh > ga:
+                    pts[t1] += 3
+                    won[t1] += 1
+                    lost[t2] += 1
+                elif ga > gh:
+                    pts[t2] += 3
+                    won[t2] += 1
+                    lost[t1] += 1
+                else:
+                    pts[t1] += 1
+                    pts[t2] += 1
+                    drawn[t1] += 1
+                    drawn[t2] += 1
+
         group_standings = {}
-        
+        teams_df = app_state["teams_df"]
         for group in GROUPS:
             g_teams = teams_df[teams_df["group"] == group]["team"].tolist()
-            
-            # Populate stats
             group_stats = []
             for t in g_teams:
                 group_stats.append({
@@ -768,227 +652,320 @@ def simulate_stage():
                     "drawn": int(drawn[t]),
                     "lost": int(lost[t]),
                     "gf": int(gf[t]),
-                    "ga": int(gf[t] - gd[t]), # ga = gf - gd
+                    "ga": int(gf[t] - gd[t]),
                     "gd": int(gd[t]),
                     "pts": int(pts[t])
                 })
-                
-            # Sort by pts desc, gd desc, gf desc (FIFA tiebreakers)
+            group_stats.sort(key=lambda x: (x["pts"], x["gd"], x["gf"]), reverse=True)
+            single_tournament["standings"][group] = group_stats
+
+    return {"status": "simulated_day", "stage": stage}
+
+# ── 3. simulate_stage — full replacement ──────────────────────────────────────
+@app.post("/api/tournament/simulate_stage")
+def simulate_stage():
+    """Simulate all matches for the current stage and advance to the next stage."""
+    stage = single_tournament["stage"]
+    if stage == "not_started":
+        raise HTTPException(status_code=400, detail="Tournament not started.")
+    if stage == "finished":
+        return {
+            "status": "finished",
+            "message": "Tournament is already finished.",
+            "champion": single_tournament["champion"],
+        }
+ 
+    if "teams_df" not in app_state or "fixture_data" not in app_state:
+        raise HTTPException(status_code=503, detail="API models/data not fully loaded yet.")
+ 
+    rng = np.random.default_rng(single_tournament["seed"])
+    live_ea_df = ratings_to_df(app_state["computed_ratings"])
+ 
+    # ── GROUP STAGE ────────────────────────────────────────────────────────────
+    if stage == "group_stage":
+        fixtures     = single_tournament["fixtures"]["group_stage"]
+        fixture_data = app_state["fixture_data"]
+        fd_map       = {(fd["home"], fd["away"]): fd for fd in fixture_data}
+ 
+        pts = defaultdict(int);  gf = defaultdict(int)
+        gd  = defaultdict(int);  won = defaultdict(int)
+        drawn = defaultdict(int); lost = defaultdict(int)
+        played = defaultdict(int)
+ 
+        for m in fixtures:
+            key = (m["home"], m["away"])
+            fd  = fd_map.get(key)
+            if not fd:
+                fd = fd_map.get((m["away"], m["home"]))
+                if fd:
+                    fd = {"p_H": fd["p_A"], "p_D": fd["p_D"], "p_A": fd["p_H"],
+                          "exp_h": fd["exp_a"], "exp_a": fd["exp_h"]}
+            if not fd:
+                fd = {"p_H": 0.45, "p_D": 0.25, "p_A": 0.30, "exp_h": 1.5, "exp_a": 1.2}
+ 
+            if not m.get("played"):
+                gh, ga = predict_wc.sample_match(fd, rng)
+                m["home_goals"] = int(gh);  m["away_goals"] = int(ga)
+                m["played"]     = True
+                m["winner"]     = m["home"] if gh > ga else (m["away"] if ga > gh else None)
+                m["win_reason"] = "90m"
+            else:
+                gh = m["home_goals"];  ga = m["away_goals"]
+ 
+            played[m["home"]] += 1;  played[m["away"]] += 1
+            gf[m["home"]] += gh;     gf[m["away"]] += ga
+            gd[m["home"]] += gh - ga; gd[m["away"]] += ga - gh
+            if gh > ga:
+                pts[m["home"]] += 3;  won[m["home"]] += 1;  lost[m["away"]] += 1
+            elif ga > gh:
+                pts[m["away"]] += 3;  won[m["away"]] += 1;  lost[m["home"]] += 1
+            else:
+                pts[m["home"]] += 1;  pts[m["away"]] += 1
+                drawn[m["home"]] += 1; drawn[m["away"]] += 1
+ 
+        teams_df = app_state["teams_df"]
+        group_standings = {}
+        for group in GROUPS:
+            g_teams = teams_df[teams_df["group"] == group]["team"].tolist()
+            group_stats = [{
+                "team": t, "played": int(played[t]), "won": int(won[t]),
+                "drawn": int(drawn[t]), "lost": int(lost[t]),
+                "gf": int(gf[t]), "ga": int(gf[t] - gd[t]), "gd": int(gd[t]), "pts": int(pts[t]),
+            } for t in g_teams]
             group_stats.sort(key=lambda x: (x["pts"], x["gd"], x["gf"]), reverse=True)
             single_tournament["standings"][group] = group_stats
             group_standings[group] = [x["team"] for x in group_stats]
-            
-        # Determine 3rd place advancement
+ 
+        # Best 8 third-place teams
         third_place_list = []
         for group in GROUPS:
-            # 3rd team is at index 2
             t = group_standings[group][2]
             third_place_list.append({
-                "team": t,
-                "group": group,
-                "pts": int(pts[t]),
-                "gd": int(gd[t]),
-                "gf": int(gf[t]),
-                "advanced": False
+                "team": t, "group": group,
+                "pts": int(pts[t]), "gd": int(gd[t]), "gf": int(gf[t]), "advanced": False,
             })
-            
-        # Sort best 3rd place teams
         third_place_list.sort(key=lambda x: (x["pts"], x["gd"], x["gf"]), reverse=True)
-        
-        # Top 8 advance
         advancing_3rd = []
-        for idx in range(12):
-            if idx < 8:
-                third_place_list[idx]["advanced"] = True
-                advancing_3rd.append(third_place_list[idx]["team"])
-                
+        for idx2 in range(12):
+            if idx2 < 8:
+                third_place_list[idx2]["advanced"] = True
+                advancing_3rd.append(third_place_list[idx2]["team"])
         single_tournament["third_place_standings"] = third_place_list
-        
-        # Build Round of 32 pairings (Interleaved to mix bracket paths)
+ 
+        # R32 pairings
         r32_pairs = []
         for i in range(4):
-            # Match 0: 1st vs 3rd
-            r32_pairs.append((group_standings[GROUPS[i*2]][0], advancing_3rd[i*2]))
-            # Match 1: 2nd vs 2nd
-            r32_pairs.append((group_standings[GROUPS[i]][1], group_standings[GROUPS[7-i]][1]))
-            # Match 2: 1st vs 3rd
+            r32_pairs.append((group_standings[GROUPS[i*2]][0],   advancing_3rd[i*2]))
+            r32_pairs.append((group_standings[GROUPS[i]][1],     group_standings[GROUPS[7-i]][1]))
             r32_pairs.append((group_standings[GROUPS[i*2+1]][0], advancing_3rd[i*2+1]))
-            # Match 3: 1st vs 2nd
-            r32_pairs.append((group_standings[GROUPS[8+i]][0], group_standings[GROUPS[11-i]][1]))
-            
-        # Populate R32 fixtures
+            r32_pairs.append((group_standings[GROUPS[8+i]][0],   group_standings[GROUPS[11-i]][1]))
+ 
+        # ── FIX: add date from KO_SCHEDULE ────────────────────────────────────
         r32_fixtures = []
-        for idx, (h, a) in enumerate(r32_pairs):
+        for idx2, (h, a) in enumerate(r32_pairs):
             r32_fixtures.append({
-                "id": f"r32_{idx}",
-                "home": h,
-                "away": a,
-                "venue": "Neutral Venue",
-                "home_goals": None,
-                "away_goals": None,
-                "played": False,
-                "winner": None,
-                "win_reason": None,
-                "extra_time": False,
-                "penalties": False,
-                "pen_winner": None,
+                "id":             f"r32_{idx2}",
+                "date":           KO_SCHEDULE["r32"][idx2] if idx2 < len(KO_SCHEDULE["r32"]) else "2026-06-28",
+                "home":           h,
+                "away":           a,
+                "venue":          "Neutral Venue",
+                "home_goals":     None,
+                "away_goals":     None,
+                "played":         False,
+                "winner":         None,
+                "win_reason":     None,
+                "extra_time":     False,
+                "penalties":      False,
+                "pen_winner":     None,
                 "pen_home_score": 0,
-                "pen_away_score": 0
+                "pen_away_score": 0,
             })
-            
+ 
         single_tournament["fixtures"]["r32"] = r32_fixtures
-        single_tournament["stage"] = "r32"
-        
+        single_tournament["stage"]           = "r32"
+ 
     else:
-        # Knockout stage simulation (r32, r16, qf, sf, final)
+        # ── KNOCKOUT STAGES ────────────────────────────────────────────────────
         fixtures = single_tournament["fixtures"][stage]
-        
-        # Initialize Form Tracker from Group Stage match results
+ 
         form_tracker = predict_wc.FormTracker()
         for m in single_tournament["fixtures"]["group_stage"]:
-            form_tracker.update(m["home"], m["away"], m["home_goals"], m["away_goals"])
-            
-        # Update Form Tracker with previous KO stages results
-        ko_stages = ["r32", "r16", "qf", "sf"]
-        for s in ko_stages:
-            if s in single_tournament["fixtures"] and single_tournament["fixtures"][s]:
-                for m in single_tournament["fixtures"][s]:
-                    if m.get("played"):
-                        form_tracker.update(m["home"], m["away"], m["home_goals"], m["away_goals"])
-                        
+            if m.get("played"):
+                form_tracker.update(m["home"], m["away"], m["home_goals"], m["away_goals"])
+        for s in ["r32", "r16", "qf", "sf"]:
+            for m in (single_tournament["fixtures"].get(s) or []):
+                if m.get("played"):
+                    form_tracker.update(m["home"], m["away"], m["home_goals"], m["away_goals"])
+ 
         winners = []
         for m in fixtures:
-            res = sample_ko_match_detailed(m["home"], m["away"], form_tracker, rng, live_ea_df)
-            m.update({
-                "home_goals": int(res["home_goals"]),
-                "away_goals": int(res["away_goals"]),
-                "played": True,
-                "winner": res["winner"],
-                "win_reason": res["win_reason"],
-                "extra_time": res["extra_time"],
-                "penalties": res["penalties"],
-                "pen_winner": res["pen_winner"],
-                "pen_home_score": int(res["pen_home_score"]),
-                "pen_away_score": int(res["pen_away_score"])
-            })
-            winners.append(res["winner"])
-            
+            if not m.get("played"):
+                res = sample_ko_match_detailed(m["home"], m["away"], form_tracker, rng, live_ea_df)
+                m.update({
+                    "home_goals":     int(res["home_goals"]),
+                    "away_goals":     int(res["away_goals"]),
+                    "played":         True,
+                    "winner":         res["winner"],
+                    "win_reason":     res["win_reason"],
+                    "extra_time":     res["extra_time"],
+                    "penalties":      res["penalties"],
+                    "pen_winner":     res["pen_winner"],
+                    "pen_home_score": int(res["pen_home_score"]),
+                    "pen_away_score": int(res["pen_away_score"]),
+                })
+            winners.append(m["winner"])
+ 
         if stage == "r32":
             single_tournament["r32_winners"] = winners
             r16_fixtures = []
             for i in range(0, 16, 2):
+                idx2 = i // 2
                 r16_fixtures.append({
-                    "id": f"r16_{i//2}",
-                    "home": winners[i],
-                    "away": winners[i+1],
-                    "venue": "Neutral Venue",
-                    "home_goals": None,
-                    "away_goals": None,
-                    "played": False,
-                    "winner": None,
-                    "win_reason": None,
-                    "extra_time": False,
-                    "penalties": False,
-                    "pen_winner": None,
-                    "pen_home_score": 0,
-                    "pen_away_score": 0
+                    "id":             f"r16_{idx2}",
+                    "date":           KO_SCHEDULE["r16"][idx2] if idx2 < len(KO_SCHEDULE["r16"]) else "2026-07-04",
+                    "home":           winners[i],
+                    "away":           winners[i+1],
+                    "venue":          "Neutral Venue",
+                    "home_goals":     None, "away_goals": None,
+                    "played":         False, "winner": None, "win_reason": None,
+                    "extra_time":     False, "penalties": False,
+                    "pen_winner":     None, "pen_home_score": 0, "pen_away_score": 0,
                 })
             single_tournament["fixtures"]["r16"] = r16_fixtures
-            single_tournament["stage"] = "r16"
-            
+            single_tournament["stage"]           = "r16"
+ 
         elif stage == "r16":
             single_tournament["r16_winners"] = winners
             qf_fixtures = []
             for i in range(0, 8, 2):
+                idx2 = i // 2
                 qf_fixtures.append({
-                    "id": f"qf_{i//2}",
-                    "home": winners[i],
-                    "away": winners[i+1],
-                    "venue": "Neutral Venue",
-                    "home_goals": None,
-                    "away_goals": None,
-                    "played": False,
-                    "winner": None,
-                    "win_reason": None,
-                    "extra_time": False,
-                    "penalties": False,
-                    "pen_winner": None,
-                    "pen_home_score": 0,
-                    "pen_away_score": 0
+                    "id":             f"qf_{idx2}",
+                    "date":           KO_SCHEDULE["qf"][idx2] if idx2 < len(KO_SCHEDULE["qf"]) else "2026-07-09",
+                    "home":           winners[i],
+                    "away":           winners[i+1],
+                    "venue":          "Neutral Venue",
+                    "home_goals":     None, "away_goals": None,
+                    "played":         False, "winner": None, "win_reason": None,
+                    "extra_time":     False, "penalties": False,
+                    "pen_winner":     None, "pen_home_score": 0, "pen_away_score": 0,
                 })
             single_tournament["fixtures"]["qf"] = qf_fixtures
-            single_tournament["stage"] = "qf"
-            
+            single_tournament["stage"]          = "qf"
+ 
         elif stage == "qf":
             single_tournament["qf_winners"] = winners
             sf_fixtures = []
             for i in range(0, 4, 2):
+                idx2 = i // 2
                 sf_fixtures.append({
-                    "id": f"sf_{i//2}",
-                    "home": winners[i],
-                    "away": winners[i+1],
-                    "venue": "Neutral Venue",
-                    "home_goals": None,
-                    "away_goals": None,
-                    "played": False,
-                    "winner": None,
-                    "win_reason": None,
-                    "extra_time": False,
-                    "penalties": False,
-                    "pen_winner": None,
-                    "pen_home_score": 0,
-                    "pen_away_score": 0
+                    "id":             f"sf_{idx2}",
+                    "date":           KO_SCHEDULE["sf"][idx2] if idx2 < len(KO_SCHEDULE["sf"]) else "2026-07-14",
+                    "home":           winners[i],
+                    "away":           winners[i+1],
+                    "venue":          "Neutral Venue",
+                    "home_goals":     None, "away_goals": None,
+                    "played":         False, "winner": None, "win_reason": None,
+                    "extra_time":     False, "penalties": False,
+                    "pen_winner":     None, "pen_home_score": 0, "pen_away_score": 0,
                 })
             single_tournament["fixtures"]["sf"] = sf_fixtures
-            single_tournament["stage"] = "sf"
-            
+            single_tournament["stage"]          = "sf"
+ 
         elif stage == "sf":
             single_tournament["sf_winners"] = winners
-            final_fixtures = [{
-                "id": "final_0",
-                "home": winners[0],
-                "away": winners[1],
-                "venue": "MetLife Stadium, New York/New Jersey",
-                "home_goals": None,
-                "away_goals": None,
-                "played": False,
-                "winner": None,
-                "win_reason": None,
-                "extra_time": False,
-                "penalties": False,
-                "pen_winner": None,
-                "pen_home_score": 0,
-                "pen_away_score": 0
+            single_tournament["fixtures"]["final"] = [{
+                "id":             "final_0",
+                "date":           KO_SCHEDULE["final"][0],
+                "home":           winners[0],
+                "away":           winners[1],
+                "venue":          "MetLife Stadium, New York/New Jersey",
+                "home_goals":     None, "away_goals": None,
+                "played":         False, "winner": None, "win_reason": None,
+                "extra_time":     False, "penalties": False,
+                "pen_winner":     None, "pen_home_score": 0, "pen_away_score": 0,
             }]
-            single_tournament["fixtures"]["final"] = final_fixtures
             single_tournament["stage"] = "final"
-            
+ 
         elif stage == "final":
             single_tournament["champion"] = winners[0]
-            single_tournament["stage"] = "finished"
-            
-    # Advance the seed slightly for the next stages
-    single_tournament["seed"] = int(single_tournament["seed"] * 31 + 17) % 1000000
-    
+            single_tournament["stage"]    = "finished"
+ 
+    single_tournament["seed"] = int(single_tournament["seed"] * 31 + 17) % 1_000_000
+ 
     return {
-        "status": "simulated",
-        "stage_completed": stage,
-        "next_stage": single_tournament["stage"]
+        "status":           "simulated",
+        "stage_completed":  stage,
+        "next_stage":       single_tournament["stage"],
     }
-
+ 
 
 # =============================================================================
 # BATCH SIMULATION ENDPOINTS
 # =============================================================================
+KO_SCHEDULE = {
+    # Round of 32 — Jun 28 – Jul 3 (16 matches, ~3 per day across 6 days)
+    "r32": [
+        "2026-06-28", "2026-06-28", "2026-06-28",
+        "2026-06-29", "2026-06-29", "2026-06-29",
+        "2026-06-30", "2026-06-30", "2026-06-30",
+        "2026-07-01", "2026-07-01", "2026-07-01",
+        "2026-07-02", "2026-07-02",
+        "2026-07-03", "2026-07-03",
+    ],
+    # Round of 16 — Jul 4 – Jul 7 (8 matches, 2 per day across 4 days)
+    "r16": [
+        "2026-07-04", "2026-07-04",
+        "2026-07-05", "2026-07-05",
+        "2026-07-06", "2026-07-06",
+        "2026-07-07", "2026-07-07",
+    ],
+    # Quarter-finals — Jul 9 – Jul 11 (4 matches)
+    "qf": [
+        "2026-07-09", "2026-07-09",
+        "2026-07-11", "2026-07-11",
+    ],
+    # Semi-finals — Jul 14 – Jul 15 (2 matches, 1 per day)
+    "sf": [
+        "2026-07-14",
+        "2026-07-15",
+    ],
+    # Final — Jul 19
+    "final": [
+        "2026-07-19",
+    ],
+}
 
 @app.get("/api/group_fixtures")
 def get_group_fixtures():
-    """Return all 72 group-stage fixtures with group, date, and city metadata."""
+    """
+    Return fixtures for display on the calendar.
+    If the tournament is in progress, returns ALL stage fixtures (group + KO)
+    with their dates so the July calendar shows knockout matches.
+    """
     if "fixture_data" not in app_state:
         raise HTTPException(status_code=503, detail="API not ready.")
+ 
+    # Tournament running — return everything with played status and dates
+    if single_tournament.get("stage") not in ("not_started", None):
+        all_fixtures = []
+        for stage_key, matches in single_tournament["fixtures"].items():
+            for m in (matches or []):
+                all_fixtures.append({
+                    "id":     m.get("id"),
+                    "home":   m["home"],
+                    "away":   m["away"],
+                    "date":   m.get("date", ""),
+                    "venue":  m.get("venue", ""),
+                    "stage":  stage_key,
+                    "played": bool(m.get("played")),
+                })
+        return {"fixtures": all_fixtures}
+ 
+    # Pre-game — group fixtures only, date from wc CSV
     wc = app_state["wc"]
     result = []
-    for fd in app_state["fixture_data"]:
+    for idx, fd in enumerate(app_state["fixture_data"]):
         mask = (wc["home_team"] == fd["home"]) & (wc["away_team"] == fd["away"])
         date_val = ""
         if mask.any():
@@ -996,14 +973,17 @@ def get_group_fixtures():
             if "date" in wc.columns:
                 date_val = str(row["date"])
         result.append({
-            "home":    fd["home"],
-            "away":    fd["away"],
-            "group":   fd["group"],
-            "date":    date_val,
-            "city":    fd.get("city", ""),
-            "country": fd.get("country", ""),
+            "id":     f"group_{fd['group']}_{idx}",
+            "home":   fd["home"],
+            "away":   fd["away"],
+            "group":  fd["group"],
+            "date":   date_val,
+            "venue":  f"{fd.get('city', '')}, {fd.get('country', '')}",
+            "stage":  "group_stage",
+            "played": False,
         })
     return {"fixtures": result}
+ 
 
 
 class BatchMatchItem(BaseModel):

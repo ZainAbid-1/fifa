@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
-  startTournament, getTournamentState, simulateStage,
+  startTournament, getTournamentState, simulateStage, simulateDay,
   injurePlayer, restorePlayer, getSquads,
   getGroupFixtures, simulateBatch,
 } from '../api/client';
@@ -22,12 +22,12 @@ const STAGE_LABELS = {
 const STAGE_ORDER = ['group_stage', 'r32', 'r16', 'qf', 'sf', 'final', 'finished'];
 
 const DATE_TO_STAGE = {
-  group_stage: { start: '2026-06-11', end: '2026-07-02' },
-  r32: { start: '2026-07-03', end: '2026-07-06' },
-  r16: { start: '2026-07-07', end: '2026-07-10' },
-  qf: { start: '2026-07-11', end: '2026-07-14' },
-  sf: { start: '2026-07-15', end: '2026-07-18' },
-  final: { start: '2026-07-19', end: '2026-07-20' },
+  group_stage: { start: '2026-06-11', end: '2026-06-27' },
+  r32: { start: '2026-06-28', end: '2026-07-03' },
+  r16: { start: '2026-07-04', end: '2026-07-07' },
+  qf: { start: '2026-07-09', end: '2026-07-11' },
+  sf: { start: '2026-07-14', end: '2026-07-15' },
+  final: { start: '2026-07-19', end: '2026-07-19' },
 };
 
 // Calendar config — June + July 2026
@@ -45,14 +45,8 @@ const DAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatDate(d) {
-  return d.toISOString().split('T')[0];
-}
-
-function parseDate(s) {
-  return new Date(s + 'T00:00:00');
-}
-
+function formatDate(d) { return d.toISOString().split('T')[0]; }
+function parseDate(s) { return new Date(s + 'T00:00:00'); }
 function isoDate(year, month, day) {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
@@ -65,48 +59,70 @@ function stageForDate(dateStr) {
   return null;
 }
 
-function stagesInRange(start, end) {
-  const s = parseDate(start);
-  const e = parseDate(end);
-  return Object.entries(DATE_TO_STAGE)
-    .filter(([, range]) => {
-      const rs = parseDate(range.start);
-      const re = parseDate(range.end);
-      return rs <= e && re >= s;
-    })
-    .map(([stage]) => stage);
-}
-
 /**
  * Build a flat map: dateString → [matchObjects]
- * Works from allFixtures (group fixtures API) or state.fixtures
+ *
+ * Priority order:
+ *  1. state.fixtures  (all stages) — authoritative (IDs + played flags)
+ *  2. allFixtures     — pre-game date metadata only
+ *
+ * FIX: we now iterate ALL stages in state.fixtures (not just group_stage)
+ * so that r32/r16/qf/sf/final fixtures with dates appear on the July calendar.
  */
 function buildDateFixtureMap(allFixtures, state) {
-  const map = {};
-
-  const addMatch = (m, fallbackStage) => {
-    const dateKey = m.date || null;
-    if (!dateKey) return;
-    if (!map[dateKey]) map[dateKey] = [];
-    map[dateKey].push({
-      home: m.home,
-      away: m.away,
-      venue: m.venue || '',
-      stage: m.stage || fallbackStage || stageForDate(dateKey) || 'group_stage',
-      id: m.id,
-      played: !!m.played,
-    });
-  };
-
+  // Step 1: date lookup from allFixtures (these have dates even pre-start)
+  const dateLookup = {};
   if (allFixtures) {
     const list = allFixtures.fixtures || allFixtures;
-    if (Array.isArray(list)) list.forEach(m => addMatch(m, 'group_stage'));
+    if (Array.isArray(list)) {
+      list.forEach(m => { if (m.date) dateLookup[`${m.home}|${m.away}`] = m.date; });
+    }
   }
 
+  const map = {};
+
+  // Step 2: Populate from ALL stages in state.fixtures
   if (state?.fixtures) {
     Object.entries(state.fixtures).forEach(([stageKey, matches]) => {
-      (matches || []).forEach(m => addMatch(m, stageKey));
+      (matches || []).forEach(m => {
+        // Use date on the fixture (backend must add it), or fall back to lookup
+        const dateKey = m.date || dateLookup[`${m.home}|${m.away}`] || null;
+        if (!dateKey) return;
+        if (!map[dateKey]) map[dateKey] = [];
+        // Avoid duplicates
+        const already = map[dateKey].some(x => x.id === m.id || (x.home === m.home && x.away === m.away));
+        if (!already) {
+          map[dateKey].push({
+            home: m.home,
+            away: m.away,
+            venue: m.venue || '',
+            stage: stageKey,
+            id: m.id,
+            played: !!m.played,
+          });
+        }
+      });
     });
+  }
+
+  // Step 3: If map is still empty (tournament not started), fall back to allFixtures for display
+  if (Object.keys(map).length === 0 && allFixtures) {
+    const list = allFixtures.fixtures || allFixtures;
+    if (Array.isArray(list)) {
+      list.forEach(m => {
+        const dateKey = m.date || null;
+        if (!dateKey) return;
+        if (!map[dateKey]) map[dateKey] = [];
+        map[dateKey].push({
+          home: m.home,
+          away: m.away,
+          venue: m.venue || '',
+          stage: m.stage || stageForDate(dateKey) || 'group_stage',
+          id: m.id || null,
+          played: !!m.played,
+        });
+      });
+    }
   }
 
   return map;
@@ -118,20 +134,15 @@ function buildDateFixtureMap(allFixtures, state) {
  */
 function buildMonthGrid(year, month) {
   const firstDay = new Date(year, month, 1);
-  // JS: 0=Sun … 6=Sat → we want Mon=0
-  const startDow = (firstDay.getDay() + 6) % 7;
+  const startDow = (firstDay.getDay() + 6) % 7;   // Mon=0
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-
   const cells = [];
   let day = 1 - startDow;
   for (let row = 0; row < 6; row++) {
     const rowCells = [];
     for (let col = 0; col < 7; col++, day++) {
-      if (day < 1 || day > daysInMonth) {
-        rowCells.push(null);
-      } else {
-        rowCells.push({ day, dateStr: isoDate(year, month, day) });
-      }
+      if (day < 1 || day > daysInMonth) rowCells.push(null);
+      else rowCells.push({ day, dateStr: isoDate(year, month, day) });
     }
     cells.push(rowCells);
   }
@@ -285,7 +296,15 @@ function BracketView({ fixtures, stage }) {
   const [activeRound, setActiveRound] = useState('r32');
   const koStages = ['r32', 'r16', 'qf', 'sf', 'final'];
 
-  const availableStages = koStages.filter(s => (fixtures[s] || []).length > 0);
+  // FIX: check fixtures[s] exists AND has length > 0 (handles undefined gracefully)
+  const availableStages = koStages.filter(s => Array.isArray(fixtures[s]) && fixtures[s].length > 0);
+
+  // Auto-select the deepest available stage so the bracket isn't blank
+  useEffect(() => {
+    if (availableStages.length > 0 && !availableStages.includes(activeRound)) {
+      setActiveRound(availableStages[availableStages.length - 1]);
+    }
+  }, [availableStages.join(',')]); // eslint-disable-line
 
   if (availableStages.length === 0) {
     return <div className="mm-empty">Complete the group stage to unlock the bracket.</div>;
@@ -306,7 +325,7 @@ function BracketView({ fixtures, stage }) {
         ))}
       </div>
 
-      {/* Desktop: horizontal tree / Mobile: active round */}
+      {/* Desktop: horizontal tree */}
       <div className="mm-bracket-desktop">
         {koStages.map(s => {
           const matches = fixtures[s] || [];
@@ -355,17 +374,22 @@ function CalendarGrid({ dateFixtureMap, onSimulateDay, busyDate, currentStage })
   const grid = useMemo(() => buildMonthGrid(year, month), [year, month]);
   const today = formatDate(new Date());
 
+  // FIX: Auto-advance to July when the group stage ends (all group dates are in June)
+  useEffect(() => {
+    if (currentStage && currentStage !== 'group_stage' && currentStage !== 'not_started') {
+      setMonthIdx(1); // switch to July for knockout stages
+    }
+  }, [currentStage]);
+
   const handleDayClick = (dateStr) => {
     const matches = dateFixtureMap[dateStr];
     if (!matches || matches.length === 0) return;
-    const unplayed = matches.filter(m => !m.played);
-    if (unplayed.length === 0) return;
-    onSimulateDay(dateStr, unplayed);
+    onSimulateDay(dateStr);
   };
 
   return (
     <div className="mm-cal-wrapper">
-      {/* Month navigation header */}
+      {/* Month navigation */}
       <div className="mm-cal-nav">
         <button
           className="mm-cal-nav-btn"
@@ -420,40 +444,48 @@ function CalendarGrid({ dateFixtureMap, onSimulateDay, busyDate, currentStage })
             const isSimulated = hasMatches && unplayed.length === 0 && played.length > 0;
             const stage = matches[0]?.stage;
 
+            const anyUnplayedUpTo = hasMatches && Object.keys(dateFixtureMap)
+              .filter(d => d <= dateStr)
+              .some(d => (dateFixtureMap[d] || []).some(m => !m.played));
+
             return (
               <button
                 key={dateStr}
                 className={[
                   'mm-cal-cell',
                   hasMatches ? 'mm-cal-cell--match' : '',
-                  unplayed.length === 0 && hasMatches ? 'mm-cal-cell--done' : '',
+                  isSimulated ? 'mm-cal-cell--done' : '',
                   isToday ? 'mm-cal-cell--today' : '',
                   isBusy ? 'mm-cal-cell--busy' : '',
                 ].filter(Boolean).join(' ')}
                 onClick={() => handleDayClick(dateStr)}
-                disabled={isBusy || unplayed.length === 0}
-                title={hasMatches ? `${matches.length} match${matches.length > 1 ? 'es' : ''} — click to simulate` : undefined}
+                disabled={isBusy || !anyUnplayedUpTo}
+                title={hasMatches
+                  ? `${matches.length} match${matches.length > 1 ? 'es' : ''} — click to simulate up to this day`
+                  : undefined}
               >
                 <span className="mm-cal-day-num">{day}</span>
 
-                {isBusy && (
-                  <div className="mm-cal-busy-ring" />
-                )}
+                {isBusy && <div className="mm-cal-busy-ring" />}
 
+                {/* FIX: show ALL matches in a scrollable list — no "+X more" truncation */}
                 {hasMatches && !isBusy && (
                   <div className="mm-cal-match-info">
-                    {matches.slice(0, 2).map((m, i) => (
+                    {matches.map((m, i) => (
                       <div key={i} className="mm-cal-match-pill">
                         <span className="mm-cal-match-teams">
                           {m.home.length > 3 ? m.home.slice(0, 3) : m.home}
                           <span className="mm-cal-match-vs"> v </span>
                           {m.away.length > 3 ? m.away.slice(0, 3) : m.away}
                         </span>
+                        {m.played && (
+                          <span className="mm-cal-match-score-inline">
+                            {/* We don't have goals here, just show ✓ */}
+                            ✓
+                          </span>
+                        )}
                       </div>
                     ))}
-                    {matches.length > 2 && (
-                      <div className="mm-cal-match-more">+{matches.length - 2} more</div>
-                    )}
                     {stage && (
                       <div className="mm-cal-stage-label">
                         {STAGE_LABELS[stage] || stage}
@@ -481,7 +513,7 @@ function CalendarGrid({ dateFixtureMap, onSimulateDay, busyDate, currentStage })
           <div className="mm-cal-legend-dot mm-cal-legend-dot--done" />
           <span>Simulated</span>
         </div>
-        <div className="mm-cal-legend-item mm-cal-legend-hint">
+        <div className="mm-cal-legend-hint mm-cal-legend-item">
           Click a match day to simulate
         </div>
       </div>
@@ -510,9 +542,17 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
 
   const currentMatch = queue[idx] || null;
 
+  // ── FIX: Fast-forward — skip all remaining matches immediately ────────────
+  function handleFastForward() {
+    pausedRef.current = true;
+    runningRef.current = false;
+    completedRef.current = true;
+    setDone(true);
+    onComplete(); // triggers the actual simulate_day call with ALL match IDs
+  }
+
   useEffect(() => {
     if (!currentMatch || paused || done) return;
-    // Guard against double-fires
     if (runningRef.current) return;
     runningRef.current = true;
 
@@ -564,7 +604,7 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
 
     run();
     return () => { cancelled = true; runningRef.current = false; };
-  }, [idx, paused, done]);
+  }, [idx, paused, done]); // eslint-disable-line
 
   function handlePause() {
     pausedRef.current = true;
@@ -574,18 +614,17 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
 
   if (!currentMatch) return null;
 
-  // Use ONLY API data — no hardcoded fallbacks that would mislead
-  const homeProb = result?.home_win_pct ?? null;
-  const drawProb = result?.draw_pct ?? null;
-  const awayProb = result?.away_win_pct ?? null;
+  const homeProb = result ? (result.home_win_pct ?? result.win_pct_home ?? null) * 100 : null;
+  const drawProb = result ? (result.draw_pct ?? null) * 100 : null;
+  const awayProb = result ? (result.away_win_pct ?? result.win_pct_away ?? null) * 100 : null;
   const hasProbs = homeProb !== null && drawProb !== null && awayProb !== null;
 
   const score = result?.most_common_score || null;
-  const [homeGoals, awayGoals] = score ? score.split('–') : ['?', '?'];
+  const [homeGoals, awayGoals] = score ? score.split(/[-–]/) : ['?', '?'];
 
   return (
     <div className={`mm-cinema ${phase === PHASES.EXIT ? 'mm-cinema--exit' : 'mm-cinema--enter'}`}>
-      {/* Background */}
+      {/* Background rings */}
       <div className="mm-cinema-bg">
         <div className="mm-pulse-ring mm-pulse-ring--1" />
         <div className="mm-pulse-ring mm-pulse-ring--2" />
@@ -602,11 +641,19 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
         ))}
       </div>
 
-      {/* Pause */}
-      <button className="mm-pause-btn" onClick={handlePause}>
-        <span className="mm-pause-icon">⏸</span>
-        <span>PAUSE</span>
-      </button>
+      {/* Controls — Pause + Fast Forward */}
+      <div className="mm-cinema-controls">
+        <button className="mm-pause-btn" onClick={handlePause}>
+          <span className="mm-pause-icon">⏸</span>
+          <span>PAUSE</span>
+        </button>
+
+        {/* FIX: Fast Forward button */}
+        <button className="mm-ff-btn" onClick={handleFastForward} title="Skip all remaining matches">
+          <span>⏭</span>
+          <span>SKIP ALL</span>
+        </button>
+      </div>
 
       {/* Counter */}
       <div className="mm-cinema-counter">Match {idx + 1} / {queue.length}</div>
@@ -634,7 +681,6 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
 
         {(phase === PHASES.REVEAL || phase === PHASES.STATS || phase === PHASES.EXIT) && (
           <div className="mm-reveal-phase">
-            {/* Nation banners with individual scores */}
             <div className="mm-nation-banners">
               <div className="mm-nation mm-nation--home">
                 <span className="mm-nation-name">{currentMatch.home}</span>
@@ -657,7 +703,6 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
               </div>
             </div>
 
-            {/* Single central score — shown ONCE, large */}
             {phase === PHASES.REVEAL && (
               <div className="mm-score-explode mm-score-explode--pop">
                 <span className="mm-score-home">{homeGoals}</span>
@@ -666,7 +711,6 @@ function CinematicOverlay({ queue, onPause, onComplete }) {
               </div>
             )}
 
-            {/* Stats bar — only shows from STATS phase onwards */}
             {(phase === PHASES.STATS || phase === PHASES.EXIT) && (
               <div className={`mm-stats-area ${phase === PHASES.STATS ? 'mm-stats-area--in' : ''}`}>
                 {hasProbs ? (
@@ -733,12 +777,14 @@ export default function TournamentSimulator() {
   }, []);
 
   const refreshState = useCallback(async () => {
-    const [st, sq] = await Promise.all([
+    const [st, sq, fx] = await Promise.all([
       getTournamentState().catch(() => null),
       getSquads().catch(() => null),
+      getGroupFixtures().catch(() => null),
     ]);
     if (st) setState(st);
     if (sq) setSquads(sq.teams || []);
+    if (fx) setAllFixtures(fx);
   }, []);
 
   // ── Date-fixture map (memoised) ───────────────────────────────────────────────
@@ -763,50 +809,62 @@ export default function TournamentSimulator() {
   }
 
   // ── Simulate a single day from calendar click ─────────────────────────────────
-  async function handleSimulateDay(dateStr, unplayedMatches) {
+  async function handleSimulateDay(dateStr) {
     setError(null);
+    setSimBusy(true);
 
-    if (!state || state.stage === 'not_started') {
-      setSimBusy(true);
-      try {
+    try {
+      if (!state || state.stage === 'not_started') {
         await startTournament();
-        const [st, fx] = await Promise.all([
-          getTournamentState(),
-          getGroupFixtures().catch(() => null),
-        ]);
-        setState(st);
-        if (fx) setAllFixtures(fx);
-      } catch (e) { setError(e.message); setSimBusy(false); return; }
+      }
+
+      const fx = await getGroupFixtures().catch(() => null);
+      if (fx) setAllFixtures(fx);
+      const fixtureList = fx?.fixtures || [];
+
+      const unplayedUpTo = fixtureList
+        .filter(m => m.date && m.id && !m.played && m.date <= dateStr)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      if (unplayedUpTo.length === 0) {
+        await refreshState();
+        setSimBusy(false);
+        return;
+      }
+
+      const queue = unplayedUpTo.map(m => ({
+        id: m.id,
+        home: m.home,
+        away: m.away,
+        venue: m.venue || '',
+        stage: m.stage || 'group_stage',
+      }));
+
+      setSimBusy(false);
+      setBusyDate(dateStr);
+      setCinema({ queue, date: dateStr });
+
+    } catch (e) {
+      setError(e.message || 'Simulation failed');
       setSimBusy(false);
     }
-
-    const queue = unplayedMatches.map(m => ({
-      home: m.home,
-      away: m.away,
-      venue: m.venue || '',
-      stage: m.stage,
-    }));
-
-    setBusyDate(dateStr);
-    setCinema({ queue, date: dateStr });
   }
 
-  // ── Cinema complete ───────────────────────────────────────────────────────────
+  // ── Cinema complete (normal finish OR fast-forward) ────────────────────────────
   async function handleCinemaComplete() {
+    const matchIds = cinema.queue.map(m => m.id).filter(Boolean);
     setCinema(null);
     setBusyDate(null);
     setSimBusy(true);
     try {
-      const st = await getTournamentState();
-      if (st && st.stage !== 'not_started' && st.stage !== 'finished') {
-        await simulateStage();
+      if (matchIds.length > 0) {
+        await simulateDay(matchIds);
       }
       await refreshState();
     } catch (e) { console.error(e); }
     finally { setSimBusy(false); }
   }
 
-  // ── Cinema pause — go back to UI, let user visit Squad tab ────────────────────
   function handleCinemaPause() {
     setCinema(null);
     setBusyDate(null);
@@ -836,7 +894,6 @@ export default function TournamentSimulator() {
 
   // ── Derived ───────────────────────────────────────────────────────────────────
   const stage = state?.stage || 'not_started';
-  const canStart = stage === 'not_started' || stage === 'finished';
   const standings = state?.standings || {};
   const fixtures = state?.fixtures || {};
   const groups = Object.keys(standings).sort();
@@ -886,11 +943,11 @@ export default function TournamentSimulator() {
           <button
             className="mm-btn mm-btn--start"
             onClick={handleStart}
-            disabled={simBusy || !canStart}
+            disabled={simBusy}
           >
             {simBusy && stage === 'not_started'
               ? <><span className="mm-spinner" /> Starting…</>
-              : canStart ? 'New Tournament' : 'Restart'
+              : stage === 'not_started' ? 'New Tournament' : 'Restart'
             }
           </button>
           <div className="mm-stage-chip">
@@ -951,7 +1008,7 @@ export default function TournamentSimulator() {
               <>
                 <div className="mm-cal-hint">
                   <span className="mm-cal-hint-icon">⚽</span>
-                  <span>Click any <strong>red match day</strong> on the calendar to launch the cinematic simulation for that day's fixtures.</span>
+                  <span>Click any <strong>match day</strong> to simulate <strong>all matches up to and including that date</strong> through the cinematic overlay.</span>
                 </div>
                 <CalendarGrid
                   dateFixtureMap={dateFixtureMap}

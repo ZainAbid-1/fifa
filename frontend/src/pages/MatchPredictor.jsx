@@ -257,12 +257,12 @@ function RatingBar({ label, value, max = 100, color }) {
 function TunnelScreen({ teamA, teamB, onComplete }) {
   const [phase, setPhase] = useState(0);
   const phases = [
-    '⚙️  INITIALISING MONTE CARLO ENGINE',
-    '🎲  RUNNING 10,000 SIMULATIONS',
-    '📊  COMPUTING EXPECTED GOALS',
-    '🔍  ANALYSING CHAOS VECTORS',
-    '⚡  CALCULATING CLUTCH FACTOR',
-    '✅  PREDICTION READY',
+    'INITIALISING MATCH ENGINE...',
+    'LOADING PLAYER RATINGS...',
+    'RUNNING 10,000 MONTE CARLO SIMULATIONS...',
+    'COMPUTING EXPECTED GOALS (xG)...',
+    'ANALYSING CLUTCH FACTORS...',
+    'PREDICTION READY'
   ];
 
   useEffect(() => {
@@ -271,36 +271,40 @@ function TunnelScreen({ teamA, teamB, onComplete }) {
       i++;
       setPhase(i);
       if (i < phases.length - 1) {
-        setTimeout(tick, 420);
+        setTimeout(tick, 500);
       } else {
-        setTimeout(onComplete, 600);
+        setTimeout(onComplete, 800);
       }
     };
-    const t = setTimeout(tick, 300);
+    const t = setTimeout(tick, 400);
     return () => clearTimeout(t);
   }, []);
 
   return (
-    <div className="tunnel-screen">
-      <div className="tunnel-bg" />
+    <div className="tunnel-screen fc-card-style">
+      <div className="tunnel-bg">
+        <div className="tunnel-glow tunnel-glow-a" />
+        <div className="tunnel-glow tunnel-glow-b" />
+      </div>
       <div className="tunnel-content">
         <div className="tunnel-vs">
           <div className="tunnel-team-a">{teamA}</div>
           <div className="tunnel-vs-badge">VS</div>
           <div className="tunnel-team-b">{teamB}</div>
         </div>
-        <div className="tunnel-log">
-          {phases.slice(0, phase + 1).map((p, i) => (
-            <div key={i} className={`tunnel-log-line ${i === phase ? 'active' : 'done'}`}>
-              {p}
-            </div>
-          ))}
+        
+        <div className="tunnel-spinner">
+           <div className="ts-ring ts-ring-1" />
+           <div className="ts-ring ts-ring-2" />
+           <div className="ts-ring ts-ring-3" />
+           <div className="ts-core">⚽</div>
         </div>
-        <div className="tunnel-progress">
-          <div
-            className="tunnel-progress-fill"
-            style={{ width: `${((phase + 1) / phases.length) * 100}%` }}
-          />
+
+        <div className="tunnel-status">
+           <div className="ts-text" key={phase}>{phases[phase]}</div>
+           <div className="ts-bar-track">
+             <div className="ts-bar-fill" style={{ width: `${((phase + 1) / phases.length) * 100}%` }} />
+           </div>
         </div>
       </div>
     </div>

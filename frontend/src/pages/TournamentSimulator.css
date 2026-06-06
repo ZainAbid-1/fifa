@@ -500,7 +500,7 @@
 
 .mm-cal-month-name {
   font-family: var(--mm-font-display);
-  font-size: 1.6rem;
+  font-size: 2rem;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -547,7 +547,10 @@
 .mm-cal-cell {
   position: relative;
   background: var(--mm-navy);
-  min-height: 90px;
+  min-height: 100px;
+  /* reduced; cell expands to fit content */
+  height: auto;
+  /* KEY FIX: was implicitly fixed at 140px */
   padding: 8px 8px 6px;
   display: flex;
   flex-direction: column;
@@ -558,7 +561,8 @@
   text-align: left;
   font-family: var(--mm-font-body);
   color: var(--mm-white);
-  overflow: hidden;
+  overflow: visible;
+  /* was: overflow: hidden — this clipped the pills */
 }
 
 .mm-cal-cell--empty {
@@ -649,7 +653,7 @@
 /* Day number */
 .mm-cal-day-num {
   font-family: var(--mm-font-display);
-  font-size: 0.88rem;
+  font-size: 1.1rem;
   font-weight: 800;
   color: rgba(255, 255, 255, 0.5);
   line-height: 1;
@@ -662,26 +666,44 @@
   color: rgba(255, 255, 255, 0.9);
 }
 
-/* Match pills inside cell */
+/* Match pills container — show ALL, scrollable if very many */
 .mm-cal-match-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
   width: 100%;
   margin-top: 2px;
+  max-height: 200px;
+  /* scroll if day has > ~6 matches */
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 45, 85, 0.3) transparent;
 }
 
+
+.mm-cal-match-info::-webkit-scrollbar {
+  width: 3px;
+}
+
+.mm-cal-match-info::-webkit-scrollbar-thumb {
+  background: rgba(255, 45, 85, 0.4);
+  border-radius: 2px;
+}
+
+/* Each pill — show all (no truncation) */
 .mm-cal-match-pill {
   background: rgba(255, 45, 85, 0.18);
   border: 1px solid rgba(255, 45, 85, 0.3);
   border-radius: 3px;
-  padding: 2px 5px;
-  font-size: 0.6rem;
+  padding: 3px 5px;
+  font-size: 0.72rem;
   line-height: 1.3;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  box-sizing: border-box;
 }
 
 .mm-cal-cell--done .mm-cal-match-pill {
@@ -693,8 +715,12 @@
   font-weight: 700;
   color: rgba(255, 255, 255, 0.85);
   font-family: var(--mm-font-display);
-  font-size: 0.62rem;
+  font-size: 0.75rem;
   letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
 }
 
 .mm-cal-match-vs {
@@ -703,16 +729,19 @@
 }
 
 .mm-cal-match-more {
-  font-size: 0.58rem;
-  color: var(--mm-red);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 1px 0;
+  display: none;
+}
+
+/* Score inline indicator (✓ for played) */
+.mm-cal-match-score-inline {
+  font-size: 0.65rem;
+  color: var(--mm-lime);
+  flex-shrink: 0;
 }
 
 .mm-cal-stage-label {
   font-family: var(--mm-font-display);
-  font-size: 0.55rem;
+  font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -933,6 +962,25 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Fast-forward / Skip All button */
+.mm-ff-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(200, 240, 0, 0.08);
+  border: 1px solid rgba(200, 240, 0, 0.25);
+  color: var(--mm-lime);
+  border-radius: 6px;
+  padding: 9px 16px;
+  font-family: var(--mm-font-display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: var(--mm-trans);
 }
 
 /* ── KO / Fixtures grids ─────────────────────────────────────────────────── */
@@ -1568,9 +1616,6 @@
 
 /* Pause button */
 .mm-pause-btn {
-  position: absolute;
-  top: 28px;
-  left: 32px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1586,7 +1631,6 @@
   text-transform: uppercase;
   cursor: pointer;
   transition: var(--mm-trans);
-  z-index: 10;
 }
 
 .mm-pause-btn:hover {
@@ -1607,6 +1651,17 @@
   max-width: 780px;
   padding: 0 32px;
   text-align: center;
+}
+
+/* ── Cinematic overlay controls bar (Pause + Fast-Forward) ──────────────── */
+.mm-cinema-controls {
+  position: absolute;
+  top: 28px;
+  left: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
 }
 
 /* Calculating phase */
@@ -2134,5 +2189,42 @@
 
   .mm-nation--away {
     padding-left: 16px;
+  }
+}
+
+
+
+/* Mobile: collapse button labels */
+@media (max-width: 768px) {
+
+  .mm-pause-btn span:not(.mm-pause-icon),
+  .mm-ff-btn span:not(:first-child) {
+    display: none;
+  }
+
+  /* On mobile each cell is compact — pills are hidden, just show a dot indicator */
+  .mm-cal-cell {
+    min-height: 50px;
+    overflow: hidden;
+    /* clip on mobile to save space */
+  }
+
+  .mm-cal-match-info {
+    display: none;
+  }
+
+  /* Red / lime dot indicator for mobile */
+  .mm-cal-cell--match::after {
+    content: '';
+    display: block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--mm-red);
+    margin: 3px auto 0;
+  }
+
+  .mm-cal-cell--done::after {
+    background: var(--mm-lime);
   }
 }
