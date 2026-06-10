@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { Analytics } from '@vercel/analytics/react';
 import Navbar from './components/Navbar';
 import LandingPage from './pages/LandingPage';
 import SquadsPage from './pages/SquadsPage';
@@ -17,6 +18,7 @@ export default function App() {
         <Route path="/simulator" element={<TournamentSimulator />} />
         <Route path="/predictor" element={<MatchPredictor />} />
       </Routes>
+      <Analytics />
     </BrowserRouter>
   );
 }
