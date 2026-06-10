@@ -71,7 +71,21 @@
   border-color: var(--gold);
 }
 
+/* ── fc-card-top: flex row holding the team select + badge ──────── */
+.fc-card-top {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  width: 100%;
+}
+
+/* ── Lineup Badge ──────────────────────────────────────────────── */
 .lineup-badge {
+  position: static;
+  /* removed absolute — was breaking mobile layout */
+  margin-left: auto;
+  flex-shrink: 0;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 99px;
@@ -87,6 +101,25 @@
   border-color: #f7b500;
   color: #f7b500;
   box-shadow: 0 0 8px rgba(247, 181, 0, 0.3);
+}
+
+/* On very narrow screens, wrap badge below the select and centre it */
+@media (max-width: 480px) {
+  .fc-card-top {
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+  }
+
+  .fc-team-select {
+    order: 1;
+    font-size: 1.6rem;
+  }
+
+  .lineup-badge {
+    order: 2;
+    margin-left: 0;
+  }
 }
 
 /* ── Rating Bars ───────────────────────────────────────────────── */
@@ -156,7 +189,6 @@
   position: relative;
   width: 100%;
   padding-bottom: 140%;
-  /* tall portrait pitch */
   background: #0d4a1f;
   border-radius: var(--radius-md);
   border: 2px solid rgba(255, 255, 255, 0.15);
@@ -292,9 +324,10 @@
   letter-spacing: 0.05em;
 }
 
+/* ── Pitch Placeholder ─────────────────────────────────────────── */
 .pitch-placeholder {
-  background: var(--bg-surface);
-  border: 1px dashed var(--border);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
   border-radius: var(--radius-md);
   min-height: 200px;
   display: flex;
@@ -306,11 +339,11 @@
 
 .pp-icon {
   font-size: 2.5rem;
-  opacity: 0.3;
+  opacity: 0.25;
 }
 
 .pp-text {
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.3);
   font-size: 0.85rem;
   font-family: var(--font-sub);
 }
@@ -525,7 +558,7 @@
   flex-direction: column;
   align-items: center;
   gap: 20px;
-  padding: 180px 0 20px;
+  padding: 160px 0 20px;
 }
 
 .tactics-vs-block {
@@ -709,8 +742,15 @@
 }
 
 @keyframes cinematicEnter {
-  from { opacity: 0; transform: scale(1.05); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(1.05);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 /* ── Tunnel Background & Glows ───────────────────────────────────── */
@@ -745,8 +785,13 @@
 }
 
 @keyframes tunnelSway {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(50px, 50px) scale(1.1); }
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+
+  100% {
+    transform: translate(50px, 50px) scale(1.1);
+  }
 }
 
 /* ── Tunnel Content ────────────────────────────────────────────── */
@@ -777,14 +822,21 @@
   font-weight: 900;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  text-shadow: 0 4px 24px rgba(0,0,0,0.8);
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.8);
   animation: slideInTeam 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   color: #fff;
 }
 
 @keyframes slideInTeam {
-  from { opacity: 0; transform: translateY(30px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .tunnel-vs-badge {
@@ -802,9 +854,20 @@
 }
 
 @keyframes pulseVS {
-  0% { transform: scale(1); box-shadow: 0 0 20px rgba(247, 181, 0, 0.3); }
-  50% { transform: scale(1.1); box-shadow: 0 0 40px rgba(247, 181, 0, 0.6); }
-  100% { transform: scale(1); box-shadow: 0 0 20px rgba(247, 181, 0, 0.3); }
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 20px rgba(247, 181, 0, 0.3);
+  }
+
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 40px rgba(247, 181, 0, 0.6);
+  }
+
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 20px rgba(247, 181, 0, 0.3);
+  }
 }
 
 /* ── Tunnel Spinner ────────────────────────────────────────────── */
@@ -820,8 +883,15 @@
 }
 
 @keyframes zoomPulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.05); }
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.05);
+  }
 }
 
 .ts-ring {
@@ -863,11 +933,21 @@
 }
 
 @keyframes spin {
-  100% { transform: rotate(360deg); }
+  100% {
+    transform: rotate(360deg);
+  }
 }
+
 @keyframes pulse {
-  0% { transform: scale(0.9); opacity: 0.7; }
-  100% { transform: scale(1.1); opacity: 1; }
+  0% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+
+  100% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
 }
 
 /* ── Tunnel Status ─────────────────────────────────────────────── */
@@ -886,13 +966,22 @@
   letter-spacing: 0.2em;
   color: #fff;
   text-transform: uppercase;
-  text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
   animation: textGlitch 0.4s ease;
 }
 
 @keyframes textGlitch {
-  0% { opacity: 0; filter: blur(10px) brightness(2); transform: scale(1.1); }
-  100% { opacity: 1; filter: blur(0) brightness(1); transform: scale(1); }
+  0% {
+    opacity: 0;
+    filter: blur(10px) brightness(2);
+    transform: scale(1.1);
+  }
+
+  100% {
+    opacity: 1;
+    filter: blur(0) brightness(1);
+    transform: scale(1);
+  }
 }
 
 .ts-bar-track {
@@ -902,7 +991,7 @@
   background: rgba(255, 255, 255, 0.15);
   border-radius: 99px;
   overflow: hidden;
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.8);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.8);
 }
 
 .ts-bar-fill {
@@ -1246,8 +1335,50 @@
   background: var(--bg-surface);
 }
 
-.team-setup-panel.fc-card-style { background: #010814; border: 1px solid var(--border-dark); border-radius: 12px; color: white; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
-.fc-team-select { background: transparent; border: none; color: white; font-family: var(--font-display); font-size: 2.2rem; font-weight: 900; text-align: center; text-transform: uppercase; cursor: pointer; outline: none; appearance: none; width: 100%; letter-spacing: 0.05em; margin: 0; }
-.fc-team-select option { background: #010814; color: white; font-family: var(--font-sub); font-size: 1.2rem; }
-.fc-flag-wrap { width: 160px; height: 106px; border-radius: 4px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.6); }
-.fc-flag { width: 100%; height: 100%; object-fit: cover; }
+/* ── FC Card Style ─────────────────────────────────────────────── */
+.team-setup-panel.fc-card-style {
+  background: #010814;
+  border: 1px solid var(--border-dark);
+  border-radius: 12px;
+  color: white;
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.fc-team-select {
+  background: transparent;
+  border: none;
+  color: white;
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  width: 100%;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+.fc-team-select option {
+  background: #010814;
+  color: white;
+  font-family: var(--font-sub);
+  font-size: 1.2rem;
+}
+
+.fc-flag-wrap {
+  width: 160px;
+  height: 106px;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+
+.fc-flag {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
