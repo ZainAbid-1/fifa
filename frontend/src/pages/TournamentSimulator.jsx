@@ -847,9 +847,9 @@ export default function TournamentSimulator() {
       if (fx) setAllFixtures(fx);
       const fixtureList = fx?.fixtures || [];
 
-      // All unplayed matches on or before the clicked date
+      // All unplayed matches on or before the clicked date (exclude TBD placeholders)
       const unplayedUpTo = fixtureList
-        .filter(m => m.date && m.id && !m.played && m.date <= dateStr)
+        .filter(m => m.date && m.id && !m.played && m.date <= dateStr && m.home !== 'TBD')
         .sort((a, b) => a.date.localeCompare(b.date));
 
       if (unplayedUpTo.length === 0) {
@@ -1033,7 +1033,7 @@ export default function TournamentSimulator() {
         {/* Tabs */}
         <div className="mm-tabs">
           {[
-            { id: 'calendar', label: '📅 Calendar' },
+            { id: 'calendar', label: 'Calendar' },
             { id: 'groups',   label: 'Standings' },
             { id: 'bracket',  label: 'Bracket' },
           ].map(t => (
@@ -1071,7 +1071,7 @@ export default function TournamentSimulator() {
             ) : (
               <>
                 <div className="mm-cal-hint">
-                  <span className="mm-cal-hint-icon">⚽</span>
+                  <span className="mm-cal-hint-icon"></span>
                   <span>Click any <strong>match day</strong> to simulate <strong>all matches up to and including that date</strong> through the cinematic overlay.</span>
                 </div>
                 <CalendarGrid

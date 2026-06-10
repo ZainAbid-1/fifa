@@ -511,16 +511,39 @@ def start_tournament(seed: Optional[int] = None):
             for t in g_teams
         ]
         
+    def create_tbd_fixtures(stage_name, count):
+        fx = []
+        for i in range(count):
+            fx.append({
+                "id": f"{stage_name}_tbd_{i}",
+                "date": KO_SCHEDULE[stage_name][i] if i < len(KO_SCHEDULE[stage_name]) else "2026-07-19",
+                "home": "TBD",
+                "away": "TBD",
+                "venue": "Neutral Venue",
+                "home_goals": None,
+                "away_goals": None,
+                "played": False,
+                "winner": None,
+                "win_reason": None,
+                "extra_time": False,
+                "penalties": False,
+                "pen_winner": None,
+                "pen_home_score": 0,
+                "pen_away_score": 0,
+                "stage": stage_name
+            })
+        return fx
+
     single_tournament.update({
         "stage": "group_stage",
         "fixtures": {
             "group_stage": group_fixtures,
-            "r32": [],
-            "r16": [],
-            "qf": [],
-            "sf": [],
-            "third_place": [],
-            "final": []
+            "r32": create_tbd_fixtures("r32", 16),
+            "r16": create_tbd_fixtures("r16", 8),
+            "qf": create_tbd_fixtures("qf", 4),
+            "sf": create_tbd_fixtures("sf", 2),
+            "third_place": create_tbd_fixtures("third_place", 1),
+            "final": create_tbd_fixtures("final", 1)
         },
         "standings": standings,
         "third_place_standings": [],
@@ -979,17 +1002,31 @@ def get_group_fixtures():
     # Tournament running — return everything with played status and dates
     if single_tournament.get("stage") not in ("not_started", None):
         all_fixtures = []
-        for stage_key, matches in single_tournament["fixtures"].items():
-            for m in (matches or []):
-                all_fixtures.append({
-                    "id":     m.get("id"),
-                    "home":   m["home"],
-                    "away":   m["away"],
-                    "date":   m.get("date", ""),
-                    "venue":  m.get("venue", ""),
-                    "stage":  stage_key,
-                    "played": bool(m.get("played")),
-                })
+        for stage_key in ["group_stage", "r32", "r16", "qf", "sf", "third_place", "final"]:
+            matches = single_tournament["fixtures"].get(stage_key, [])
+            if not matches and stage_key in KO_SCHEDULE:
+                # Dynamically inject placeholders for backwards compatibility if they haven't been seeded
+                for i, d in enumerate(KO_SCHEDULE[stage_key]):
+                    all_fixtures.append({
+                        "id": f"{stage_key}_tbd_{i}",
+                        "home": "TBD",
+                        "away": "TBD",
+                        "date": d,
+                        "venue": "Neutral Venue",
+                        "stage": stage_key,
+                        "played": False,
+                    })
+            else:
+                for m in matches:
+                    all_fixtures.append({
+                        "id":     m.get("id"),
+                        "home":   m["home"],
+                        "away":   m["away"],
+                        "date":   m.get("date", ""),
+                        "venue":  m.get("venue", ""),
+                        "stage":  stage_key,
+                        "played": bool(m.get("played")),
+                    })
         return {"fixtures": all_fixtures}
  
     # Pre-game — group fixtures only, date from wc CSV
@@ -1012,6 +1049,21 @@ def get_group_fixtures():
             "stage":  "group_stage",
             "played": False,
         })
+    
+    # Add TBD placeholders for knockout stages pre-game
+    for stage_name, dates in KO_SCHEDULE.items():
+        for i, d in enumerate(dates):
+            result.append({
+                "id": f"{stage_name}_tbd_{i}",
+                "home": "TBD",
+                "away": "TBD",
+                "group": None,
+                "date": d,
+                "venue": "Neutral Venue",
+                "stage": stage_name,
+                "played": False,
+            })
+
     return {"fixtures": result}
  
 
