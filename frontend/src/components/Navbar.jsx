@@ -2,10 +2,11 @@ import { NavLink } from 'react-router-dom';
 import './Navbar.css';
 
 const LINKS = [
-  { to: '/',           label: 'Home'       },
-  { to: '/squads',     label: 'Squads'     },
-  { to: '/simulator',  label: 'Simulator'  },
-  { to: '/predictor',  label: 'Predictor'  },
+  { to: '/', label: 'Home' },
+  { to: '/dashboard', label: 'Dashboard' },
+  { to: '/squads', label: 'Squads' },
+  { to: '/simulator', label: 'Simulator' },
+  { to: '/predictor', label: 'Predictor' },
 ];
 
 export default function Navbar() {
