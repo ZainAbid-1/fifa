@@ -197,7 +197,6 @@ function TeamModal({ team, onClose }) {
     );
 }
 
-// Inline styles as a style tag to keep component self-contained
 const styles = `
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700&family=Barlow:wght@400;500;600&family=Share+Tech+Mono&display=swap');
 
@@ -238,16 +237,13 @@ body { background: var(--bg-deep); color: var(--text-primary); font-family: var(
     position: relative;
     background: linear-gradient(135deg, #0a0c10 0%, #0d1020 60%, #0a0c10 100%);
     overflow: hidden;
-    border-bottom: none;
     text-align: left;
-    display: flex;
-    flex-direction: column;
 }
 .hero::before {
     content: '';
     position: absolute;
     inset: 0;
-    background: radial-gradient(ellipse 50% 120% at 80% 50%, rgba(200,255,0,0.04) 0%, transparent 70%);
+    background: radial-gradient(ellipse 80% 100% at 80% 50%, rgba(200,255,0,0.04) 0%, transparent 70%);
     pointer-events: none;
 }
 .hero-grid-bg {
@@ -259,17 +255,15 @@ body { background: var(--bg-deep); color: var(--text-primary); font-family: var(
     pointer-events: none;
 }
 
-/* FIX: hero-content controls padding, not hero itself */
 .hero-content {
     position: relative;
     z-index: 1;
     max-width: 1400px;
     width: 100%;
     margin: 0 auto;
-    padding: 40px 24px 32px;
+    padding: 28px 24px 24px;
 }
 
-/* FIX: no white-space: nowrap — title wraps naturally; clear margin below */
 .hero-title {
     font-family: var(--font-display);
     font-weight: 900;
@@ -277,11 +271,12 @@ body { background: var(--bg-deep); color: var(--text-primary); font-family: var(
     line-height: 0.88;
     letter-spacing: -0.01em;
     text-transform: uppercase;
-    margin-bottom: 28px;
+    margin-bottom: 16px;
     display: block;
     white-space: normal;
 }
 .hero-title em { font-style: italic; color: var(--lime); }
+
 .hero-stats {
     display: flex;
     flex-wrap: wrap;
@@ -316,7 +311,7 @@ body { background: var(--bg-deep); color: var(--text-primary); font-family: var(
     margin-top: 2px;
 }
 
-/* ── TICKER (bottom of hero, always visible) ── */
+/* ── TICKER ── */
 .ticker-wrapper {
     position: relative;
     z-index: 1;
@@ -422,7 +417,6 @@ body { background: var(--bg-deep); color: var(--text-primary); font-family: var(
     padding: 24px 20px 20px;
     text-align: center;
     position: relative;
-    overflow: hidden;
     transition: transform 0.2s;
     cursor: pointer;
 }
@@ -568,17 +562,21 @@ body { background: var(--bg-deep); color: var(--text-primary); font-family: var(
     .podium-grid { gap: 8px; }
     .bc-row { grid-template-columns: 120px 1fr 44px; }
 }
+
 @media (max-width: 768px) {
-    /* FIX: hero-content owns the padding, eliminates the dead black space */
-    .hero-content { padding: 24px 16px 20px; }
-    .hero-title { font-size: clamp(36px, 10vw, 60px); margin-bottom: 20px; }
+    .hero-content { padding: 16px 16px 14px; }
+    .hero-title { font-size: clamp(34px, 9vw, 56px); margin-bottom: 10px; }
     .hero-stats { width: 100%; }
-    .hero-stat { padding: 10px 14px; }
-    .hero-stat-num { font-size: 22px; }
-    .page-body { padding: 20px 16px; }
+    .hero-stat { padding: 8px 10px; }
+    .hero-stat-num { font-size: 19px; }
+    .hero-stat-label { font-size: 9px; letter-spacing: 0.08em; }
+    .ticker-wrapper { height: 38px; }
+    .ticker-label { padding: 0 12px; font-size: 11px; }
+    .ticker-item { font-size: 13px; padding: 0 16px; }
+    .page-body { padding: 14px 12px; }
     .nav-inner { padding: 0 12px; }
-    .nav-tab { padding: 14px 14px; font-size: 12px; }
-    .podium-grid { grid-template-columns: 1fr; max-width: 360px; margin-left: auto; margin-right: auto; align-items: start; }
+    .nav-tab { padding: 12px 10px; font-size: 11px; }
+    .podium-grid { grid-template-columns: 1fr; max-width: 340px; margin-left: auto; margin-right: auto; align-items: start; }
     .podium-card.p1 { order: -1; }
     .podium-card.p2 { order: 0; }
     .podium-card.p3 { order: 1; }
@@ -594,19 +592,18 @@ body { background: var(--bg-deep); color: var(--text-primary); font-family: var(
     .filter-bar { gap: 6px; }
     .search-box { width: 100%; }
     .sort-select { width: 100%; }
-    .ticker-item { font-size: 13px; padding: 0 20px; }
 }
+
 @media (max-width: 480px) {
-    .hero-title { font-size: clamp(30px, 12vw, 44px); }
-    .hero-stat-num { font-size: 18px; }
-    .hero-stat-label { font-size: 9px; }
-    .hero-stat { padding: 8px 10px; }
+    .hero-content { padding: 14px 12px 12px; }
+    .hero-title { font-size: clamp(26px, 10vw, 38px); margin-bottom: 8px; }
+    .hero-stat-num { font-size: 16px; }
+    .hero-stat-label { font-size: 8px; }
+    .hero-stat { padding: 7px 8px; }
     .contenders-row { grid-template-columns: repeat(2, 1fr); }
     .bc-row { grid-template-columns: 90px 1fr 36px; }
     .bc-label { font-size: 10px; }
     .mp-row { grid-template-columns: 75px 1fr 40px; }
-    .ticker-wrapper { height: 40px; }
-    .ticker-label { padding: 0 12px; font-size: 11px; }
 }
 `;
 
@@ -691,7 +688,6 @@ export default function SimulationDashboard() {
                             ))}
                         </div>
                     </div>
-                    {/* ── TICKER inside hero, always visible ── */}
                     <div className="ticker-wrapper">
                         <div className="ticker-label">
                             <span className="ticker-dot" />
