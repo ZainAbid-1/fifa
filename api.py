@@ -227,15 +227,14 @@ app = FastAPI(title="World Cup 2026 API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",          # Vite local port
-        "http://localhost:3000", 
-        "https://fifa-sigma-eight.vercel.app"        # Standard React local port
+        "https://fifa-sigma-eight.vercel.app", # Your Vercel URL
+        "http://localhost:5173",               # Local Vite
+        "http://localhost:3000"                # Local Standard React
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # =============================================================================
 # EXISTING ENDPOINTS (preserved)
