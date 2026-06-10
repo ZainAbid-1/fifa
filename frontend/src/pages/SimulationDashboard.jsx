@@ -745,7 +745,6 @@ export default function SimulationDashboard() {
                                         </div>
                                     </div>
                                     <div className="podium-card p1" onClick={() => setSelectedTeam(top3[0].team)}>
-                                        <div className="rank-badge">Favourite</div>
                                         <div className="podium-medal">Champion</div>
                                         <div className="podium-flag-wrap"><FlagImg team={top3[0].team} width={80} /></div>
                                         <div className="podium-name">{top3[0].team}</div>
