@@ -711,7 +711,25 @@
   border-color: rgba(200, 240, 0, 0.2);
 }
 
-.mm-cal-match-teams {
+.mm-cal-match-pill--ko {
+  border: 1px solid var(--mm-gold);
+  background: rgba(245, 197, 24, 0.15);
+}
+
+.mm-cal-cell--done .mm-cal-match-pill--ko {
+  border-color: var(--mm-lime);
+  background: rgba(200, 240, 0, 0.15);
+}
+
+.mm-cal-team-pair {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.mm-cal-team-name {
   font-weight: 700;
   color: rgba(255, 255, 255, 0.85);
   font-family: var(--mm-font-display);
@@ -720,16 +738,14 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1;
+  max-width: 65px;
 }
 
-.mm-cal-match-vs {
+.mm-cal-vs-divider {
   color: var(--mm-muted);
   font-weight: 400;
-}
-
-.mm-cal-match-more {
-  display: none;
+  font-size: 0.65rem;
+  flex-shrink: 0;
 }
 
 /* Score inline indicator (✓ for played) */
@@ -1089,6 +1105,11 @@
 
 .mm-standings-row--q {
   border-left: 3px solid var(--mm-lime);
+}
+
+.mm-standings-row--third-q {
+  border-left: 3px solid var(--mm-lime);
+  background: linear-gradient(90deg, rgba(200, 240, 0, 0.1) 0%, transparent 100%);
 }
 
 .mm-standings-row--t {

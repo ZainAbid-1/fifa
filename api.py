@@ -360,7 +360,7 @@ def _update_ea_df(team: str, new_rating: dict):
 GROUPS = list("ABCDEFGHIJKL")
 
 single_tournament = {
-    "stage": "not_started", # "not_started", "group_stage", "r32", "r16", "qf", "sf", "final", "finished"
+    "stage": "not_started", # not_started → group_stage → r32 → r16 → qf → sf → third_place → final → finished
     "fixtures": {},         # stage_name -> list of matches
     "standings": {},        # group_name -> list of team standing dicts
     "third_place_standings": [],
@@ -368,6 +368,7 @@ single_tournament = {
     "r16_winners": [],
     "qf_winners": [],
     "sf_winners": [],
+    "third_place_winner": None,
     "champion": None,
     "seed": 42
 }
@@ -518,6 +519,7 @@ def start_tournament(seed: Optional[int] = None):
             "r16": [],
             "qf": [],
             "sf": [],
+            "third_place": [],
             "final": []
         },
         "standings": standings,
@@ -526,6 +528,7 @@ def start_tournament(seed: Optional[int] = None):
         "r16_winners": [],
         "qf_winners": [],
         "sf_winners": [],
+        "third_place_winner": None,
         "champion": None
     })
     
@@ -555,7 +558,7 @@ def simulate_day(req: SimulateDayRequest):
     fd_map = {(fd["home"], fd["away"]): fd for fd in fixture_data}
     
     form_tracker = predict_wc.FormTracker()
-    for s in ["group_stage", "r32", "r16", "qf", "sf"]:
+    for s in ["group_stage", "r32", "r16", "qf", "sf", "third_place"]:
         if s in single_tournament["fixtures"]:
             for m in single_tournament["fixtures"][s]:
                 if m.get("played"):
@@ -792,7 +795,7 @@ def simulate_stage():
         for m in single_tournament["fixtures"]["group_stage"]:
             if m.get("played"):
                 form_tracker.update(m["home"], m["away"], m["home_goals"], m["away_goals"])
-        for s in ["r32", "r16", "qf", "sf"]:
+        for s in ["r32", "r16", "qf", "sf", "third_place"]:
             for m in (single_tournament["fixtures"].get(s) or []):
                 if m.get("played"):
                     form_tracker.update(m["home"], m["away"], m["home_goals"], m["away_goals"])
@@ -874,6 +877,25 @@ def simulate_stage():
  
         elif stage == "sf":
             single_tournament["sf_winners"] = winners
+            # Determine semi-final losers for the third-place play-off
+            sf_losers = []
+            for m in fixtures:
+                if m.get("played") and m.get("winner"):
+                    loser = m["away"] if m["winner"] == m["home"] else m["home"]
+                    sf_losers.append(loser)
+            # Third-place play-off (Jul 18)
+            single_tournament["fixtures"]["third_place"] = [{
+                "id":             "third_place_0",
+                "date":           KO_SCHEDULE["third_place"][0],
+                "home":           sf_losers[0] if len(sf_losers) > 0 else "TBD",
+                "away":           sf_losers[1] if len(sf_losers) > 1 else "TBD",
+                "venue":          "Estadio Azteca, Mexico City",
+                "home_goals":     None, "away_goals": None,
+                "played":         False, "winner": None, "win_reason": None,
+                "extra_time":     False, "penalties": False,
+                "pen_winner":     None, "pen_home_score": 0, "pen_away_score": 0,
+            }]
+            # Final (Jul 19)
             single_tournament["fixtures"]["final"] = [{
                 "id":             "final_0",
                 "date":           KO_SCHEDULE["final"][0],
@@ -885,6 +907,10 @@ def simulate_stage():
                 "extra_time":     False, "penalties": False,
                 "pen_winner":     None, "pen_home_score": 0, "pen_away_score": 0,
             }]
+            single_tournament["stage"] = "third_place"
+ 
+        elif stage == "third_place":
+            single_tournament["third_place_winner"] = winners[0] if winners else None
             single_tournament["stage"] = "final"
  
         elif stage == "final":
@@ -913,14 +939,14 @@ KO_SCHEDULE = {
         "2026-07-02", "2026-07-02",
         "2026-07-03", "2026-07-03",
     ],
-    # Round of 16 — Jul 4 – Jul 7 (8 matches, 2 per day across 4 days)
+    # Round of 16 — Jul 5 – Jul 8 (8 matches, 2 per day across 4 days)
     "r16": [
-        "2026-07-04", "2026-07-04",
         "2026-07-05", "2026-07-05",
         "2026-07-06", "2026-07-06",
         "2026-07-07", "2026-07-07",
+        "2026-07-08", "2026-07-08",
     ],
-    # Quarter-finals — Jul 9 – Jul 11 (4 matches)
+    # Quarter-finals — Jul 9 & Jul 11 (4 matches, 2 per day)
     "qf": [
         "2026-07-09", "2026-07-09",
         "2026-07-11", "2026-07-11",
@@ -929,6 +955,10 @@ KO_SCHEDULE = {
     "sf": [
         "2026-07-14",
         "2026-07-15",
+    ],
+    # Third-place play-off — Jul 18
+    "third_place": [
+        "2026-07-18",
     ],
     # Final — Jul 19
     "final": [

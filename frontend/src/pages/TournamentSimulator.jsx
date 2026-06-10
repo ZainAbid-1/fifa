@@ -15,19 +15,21 @@ const STAGE_LABELS = {
   r16: 'Round of 16',
   qf: 'Quarter Finals',
   sf: 'Semi Finals',
+  third_place: 'Third Place',
   final: 'Final',
   finished: 'Finished',
 };
 
-const STAGE_ORDER = ['group_stage', 'r32', 'r16', 'qf', 'sf', 'final', 'finished'];
+const STAGE_ORDER = ['group_stage', 'r32', 'r16', 'qf', 'sf', 'third_place', 'final', 'finished'];
 
 const DATE_TO_STAGE = {
-  group_stage: { start: '2026-06-11', end: '2026-06-27' },
-  r32: { start: '2026-06-28', end: '2026-07-03' },
-  r16: { start: '2026-07-04', end: '2026-07-07' },
-  qf: { start: '2026-07-09', end: '2026-07-11' },
-  sf: { start: '2026-07-14', end: '2026-07-15' },
-  final: { start: '2026-07-19', end: '2026-07-19' },
+  group_stage:  { start: '2026-06-11', end: '2026-06-27' },
+  r32:          { start: '2026-06-28', end: '2026-07-03' },
+  r16:          { start: '2026-07-05', end: '2026-07-08' },
+  qf:           { start: '2026-07-09', end: '2026-07-12' },
+  sf:           { start: '2026-07-14', end: '2026-07-15' },
+  third_place:  { start: '2026-07-18', end: '2026-07-18' },
+  final:        { start: '2026-07-19', end: '2026-07-19' },
 };
 
 // Calendar config — June + July 2026
@@ -42,6 +44,26 @@ const MONTH_NAMES = [
 ];
 
 const DAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+// ─── Team abbreviations (for calendar display) ────────────────────────────────
+
+const TEAM_ABBREV = {
+  'United States': 'USA',
+  'South Korea': 'Korea',
+  'Saudi Arabia': 'S. Arabia',
+  'Bosnia-Herzegovina': 'Bosnia',
+  'Trinidad and Tobago': 'T&T',
+  'New Zealand': 'N. Zealand',
+  'Cape Verde': 'C. Verde',
+  'DR Congo': 'DR Congo',
+  'South Africa': 'S. Africa',
+  'Ivory Coast': "Côte d'IV",
+  "Côte d'Ivoire": "Côte d'IV",
+};
+
+function teamShort(name) {
+  return TEAM_ABBREV[name] || name;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -196,7 +218,7 @@ function MatchCard({ match, small }) {
   );
 }
 
-function StandingsTable({ group, rows }) {
+function StandingsTable({ group, rows, advancedThirdTeams }) {
   return (
     <div className="mm-standings-group">
       <div className="mm-standings-title">
@@ -209,22 +231,29 @@ function StandingsTable({ group, rows }) {
             <span key={h} className="st-num">{h}</span>
           ))}
         </div>
-        {rows.map((r, i) => (
-          <div key={r.team} className={`mm-standings-row ${i < 2 ? 'mm-standings-row--q' : i === 2 ? 'mm-standings-row--t' : ''}`}>
-            <span className="st-team">
-              <span className="st-pos">{i + 1}</span>
-              {r.team}
-            </span>
-            <span className="st-num">{r.played}</span>
-            <span className="st-num">{r.won}</span>
-            <span className="st-num">{r.drawn}</span>
-            <span className="st-num">{r.lost}</span>
-            <span className="st-num">{r.gf}</span>
-            <span className="st-num">{r.ga}</span>
-            <span className="st-num">{r.gd > 0 ? `+${r.gd}` : r.gd}</span>
-            <span className="st-num st-num--pts">{r.pts}</span>
-          </div>
-        ))}
+        {rows.map((r, i) => {
+          const isAdvancedThird = i === 2 && advancedThirdTeams?.has(r.team);
+          return (
+            <div key={r.team} className={[
+              'mm-standings-row',
+              i < 2 ? 'mm-standings-row--q' : '',
+              isAdvancedThird ? 'mm-standings-row--third-q' : (i === 2 ? 'mm-standings-row--t' : ''),
+            ].filter(Boolean).join(' ')}>
+              <span className="st-team">
+                <span className="st-pos">{i + 1}</span>
+                {r.team}
+              </span>
+              <span className="st-num">{r.played}</span>
+              <span className="st-num">{r.won}</span>
+              <span className="st-num">{r.drawn}</span>
+              <span className="st-num">{r.lost}</span>
+              <span className="st-num">{r.gf}</span>
+              <span className="st-num">{r.ga}</span>
+              <span className="st-num">{r.gd > 0 ? `+${r.gd}` : r.gd}</span>
+              <span className="st-num st-num--pts">{r.pts}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -294,7 +323,7 @@ function InjuryManager({ squads, onToggle, busy }) {
 
 function BracketView({ fixtures, stage }) {
   const [activeRound, setActiveRound] = useState('r32');
-  const koStages = ['r32', 'r16', 'qf', 'sf', 'final'];
+  const koStages = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'];
 
   // FIX: check fixtures[s] exists AND has length > 0 (handles undefined gracefully)
   const availableStages = koStages.filter(s => Array.isArray(fixtures[s]) && fixtures[s].length > 0);
@@ -468,22 +497,17 @@ function CalendarGrid({ dateFixtureMap, onSimulateDay, busyDate, currentStage })
 
                 {isBusy && <div className="mm-cal-busy-ring" />}
 
-                {/* FIX: show ALL matches in a scrollable list — no "+X more" truncation */}
+                {/* Show all matches — use full team names with smart abbreviations */}
                 {hasMatches && !isBusy && (
                   <div className="mm-cal-match-info">
                     {matches.map((m, i) => (
-                      <div key={i} className="mm-cal-match-pill">
-                        <span className="mm-cal-match-teams">
-                          {m.home.length > 3 ? m.home.slice(0, 3) : m.home}
-                          <span className="mm-cal-match-vs"> v </span>
-                          {m.away.length > 3 ? m.away.slice(0, 3) : m.away}
-                        </span>
-                        {m.played && (
-                          <span className="mm-cal-match-score-inline">
-                            {/* We don't have goals here, just show ✓ */}
-                            ✓
-                          </span>
-                        )}
+                      <div key={i} className={`mm-cal-match-pill${m.stage && m.stage !== 'group_stage' ? ' mm-cal-match-pill--ko' : ''}`}>
+                        <div className="mm-cal-team-pair">
+                          <span className="mm-cal-team-name">{teamShort(m.home)}</span>
+                          <span className="mm-cal-vs-divider">v</span>
+                          <span className="mm-cal-team-name">{teamShort(m.away)}</span>
+                        </div>
+                        {m.played && <span className="mm-cal-match-score-inline">✓</span>}
                       </div>
                     ))}
                     {stage && (
@@ -818,16 +842,35 @@ export default function TournamentSimulator() {
         await startTournament();
       }
 
+      // Refresh all fixtures (group + all KO stages)
       const fx = await getGroupFixtures().catch(() => null);
       if (fx) setAllFixtures(fx);
       const fixtureList = fx?.fixtures || [];
 
+      // All unplayed matches on or before the clicked date
       const unplayedUpTo = fixtureList
         .filter(m => m.date && m.id && !m.played && m.date <= dateStr)
         .sort((a, b) => a.date.localeCompare(b.date));
 
       if (unplayedUpTo.length === 0) {
-        await refreshState();
+        // No unplayed matches — check if current stage is complete and needs advancing
+        const freshState = await getTournamentState().catch(() => null);
+        if (freshState) setState(freshState);
+        const curStage = freshState?.stage;
+        const stageFx = freshState?.fixtures?.[curStage] || [];
+        const allDone = stageFx.length > 0 && stageFx.every(m => m.played);
+        if (allDone && !['finished', 'not_started'].includes(curStage)) {
+          // Auto-advance: generate next round's fixtures
+          await simulateStage();
+          const [newSt, newFx] = await Promise.all([
+            getTournamentState().catch(() => null),
+            getGroupFixtures().catch(() => null),
+          ]);
+          if (newSt) setState(newSt);
+          if (newFx) setAllFixtures(newFx);
+        } else {
+          await refreshState();
+        }
         setSimBusy(false);
         return;
       }
@@ -860,7 +903,22 @@ export default function TournamentSimulator() {
       if (matchIds.length > 0) {
         await simulateDay(matchIds);
       }
-      await refreshState();
+      // Check if current stage is now fully complete → auto-advance to next stage
+      const freshState = await getTournamentState().catch(() => null);
+      if (freshState) setState(freshState);
+      const curStage = freshState?.stage;
+      const stageFx = freshState?.fixtures?.[curStage] || [];
+      const allDone = stageFx.length > 0 && stageFx.every(m => m.played);
+      if (allDone && !['finished', 'not_started'].includes(curStage)) {
+        await simulateStage();
+      }
+      // Final refresh — picks up newly-created KO fixtures + updated stage
+      const [st, fx] = await Promise.all([
+        getTournamentState().catch(() => null),
+        getGroupFixtures().catch(() => null),
+      ]);
+      if (st) setState(st);
+      if (fx) setAllFixtures(fx);
     } catch (e) { console.error(e); }
     finally { setSimBusy(false); }
   }
@@ -868,7 +926,7 @@ export default function TournamentSimulator() {
   function handleCinemaPause() {
     setCinema(null);
     setBusyDate(null);
-    setTab('injuries');
+    setTab('calendar');
     refreshState();
   }
 
@@ -892,11 +950,18 @@ export default function TournamentSimulator() {
     finally { setInjBusy(null); }
   }
 
-  // ── Derived ───────────────────────────────────────────────────────────────────
+  // ── Derived ──────────────────────────────────────────────────────────────
   const stage = state?.stage || 'not_started';
   const standings = state?.standings || {};
   const fixtures = state?.fixtures || {};
   const groups = Object.keys(standings).sort();
+
+  // Teams that qualified as one of the top-8 third-placed sides
+  const advancedThirdTeams = useMemo(() => {
+    const set = new Set();
+    (state?.third_place_standings || []).forEach(t => { if (t.advanced) set.add(t.team); });
+    return set;
+  }, [state]);
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -969,9 +1034,8 @@ export default function TournamentSimulator() {
         <div className="mm-tabs">
           {[
             { id: 'calendar', label: '📅 Calendar' },
-            { id: 'groups', label: 'Standings' },
-            { id: 'bracket', label: 'Bracket' },
-            { id: 'injuries', label: 'Squad' },
+            { id: 'groups',   label: 'Standings' },
+            { id: 'bracket',  label: 'Bracket' },
           ].map(t => (
             <button
               key={t.id}
@@ -1029,7 +1093,7 @@ export default function TournamentSimulator() {
             ) : (
               <div className="mm-standings-grid">
                 {groups.map(g => (
-                  <StandingsTable key={g} group={g} rows={standings[g] || []} />
+                  <StandingsTable key={g} group={g} rows={standings[g] || []} advancedThirdTeams={advancedThirdTeams} />
                 ))}
               </div>
             )}
@@ -1043,17 +1107,6 @@ export default function TournamentSimulator() {
           </div>
         )}
 
-        {/* ── Squad ── */}
-        {tab === 'injuries' && (
-          <div className="mm-tab-pane mm-anim-in">
-            {cinema === null && busyDate === null && (
-              <div className="mm-resume-hint">
-                <span>💡 After injuring players, switch back to the Calendar tab and click the same match day to simulate with updated ratings.</span>
-              </div>
-            )}
-            <InjuryManager squads={squads} onToggle={handleToggleInjury} busy={injBusy} />
-          </div>
-        )}
 
       </div>
     </main>
