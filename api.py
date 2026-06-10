@@ -692,8 +692,10 @@ def simulate_day(req: SimulateDayRequest, x_session_id: str = Header("default"))
 
 # ── 3. simulate_stage — full replacement ──────────────────────────────────────
 @app.post("/api/tournament/simulate_stage")
-def simulate_stage():
+def simulate_stage(x_session_id: str = Header("default")):
     """Simulate all matches for the current stage and advance to the next stage."""
+    session = get_session(x_session_id)
+    single_tournament = session["tournament"]
     stage = single_tournament["stage"]
     if stage == "not_started":
         raise HTTPException(status_code=400, detail="Tournament not started.")
@@ -993,7 +995,7 @@ KO_SCHEDULE = {
 }
 
 @app.get("/api/group_fixtures")
-def get_group_fixtures():
+def get_group_fixtures(x_session_id: str = Header("default")):
     """
     Return fixtures for display on the calendar.
     If the tournament is in progress, returns ALL stage fixtures (group + KO)
@@ -1002,6 +1004,9 @@ def get_group_fixtures():
     if "fixture_data" not in app_state:
         raise HTTPException(status_code=503, detail="API not ready.")
  
+    session = get_session(x_session_id)
+    single_tournament = session["tournament"]
+
     # Tournament running — return everything with played status and dates
     if single_tournament.get("stage") not in ("not_started", None):
         all_fixtures = []

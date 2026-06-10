@@ -2,10 +2,10 @@
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 function getSessionId() {
-  let sid = localStorage.getItem('fifa_session_id');
+  let sid = sessionStorage.getItem('fifa_session_id');
   if (!sid) {
     sid = Math.random().toString(36).substring(2, 15);
-    localStorage.setItem('fifa_session_id', sid);
+    sessionStorage.setItem('fifa_session_id', sid);
   }
   return sid;
 }
