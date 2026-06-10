@@ -228,7 +228,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",          # Vite local port
-        "http://localhost:3000",          # Standard React local port
+        "http://localhost:3000", 
+        "https://fifa-sigma-eight.vercel.app"        # Standard React local port
     ],
     allow_credentials=True,
     allow_methods=["*"],
