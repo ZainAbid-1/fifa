@@ -241,6 +241,7 @@ app.add_middleware(
 # =============================================================================
 
 @app.get("/")
+@app.head("/")
 def read_root():
     return {"status": "ok", "message": "World Cup 2026 API is running."}
 
