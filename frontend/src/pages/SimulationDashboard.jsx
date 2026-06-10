@@ -258,17 +258,28 @@ body { background: var(--bg-deep); color: var(--text-primary); font-family: var(
     opacity: 0.3;
     pointer-events: none;
 }
-.hero-content { position: relative; z-index: 1; max-width: 1400px; width: 100%; margin: 0 auto; padding: 40px 24px 32px; }
+
+/* FIX: hero-content controls padding, not hero itself */
+.hero-content {
+    position: relative;
+    z-index: 1;
+    max-width: 1400px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 40px 24px 32px;
+}
+
+/* FIX: no white-space: nowrap — title wraps naturally; clear margin below */
 .hero-title {
     font-family: var(--font-display);
     font-weight: 900;
-    font-size: clamp(56px, 9vw, 96px);
+    font-size: clamp(48px, 7vw, 96px);
     line-height: 0.88;
     letter-spacing: -0.01em;
     text-transform: uppercase;
-    margin-bottom: 24px;
+    margin-bottom: 28px;
     display: block;
-    white-space: nowrap;
+    white-space: normal;
 }
 .hero-title em { font-style: italic; color: var(--lime); }
 .hero-stats {
@@ -558,8 +569,9 @@ body { background: var(--bg-deep); color: var(--text-primary); font-family: var(
     .bc-row { grid-template-columns: 120px 1fr 44px; }
 }
 @media (max-width: 768px) {
-    .hero { padding: 28px 16px 24px; }
-    .hero-title { font-size: clamp(38px, 11vw, 64px); margin-bottom: 12px; white-space: normal; }
+    /* FIX: hero-content owns the padding, eliminates the dead black space */
+    .hero-content { padding: 24px 16px 20px; }
+    .hero-title { font-size: clamp(36px, 10vw, 60px); margin-bottom: 20px; }
     .hero-stats { width: 100%; }
     .hero-stat { padding: 10px 14px; }
     .hero-stat-num { font-size: 22px; }
@@ -585,7 +597,7 @@ body { background: var(--bg-deep); color: var(--text-primary); font-family: var(
     .ticker-item { font-size: 13px; padding: 0 20px; }
 }
 @media (max-width: 480px) {
-    .hero-title { font-size: clamp(32px, 13vw, 48px); }
+    .hero-title { font-size: clamp(30px, 12vw, 44px); }
     .hero-stat-num { font-size: 18px; }
     .hero-stat-label { font-size: 9px; }
     .hero-stat { padding: 8px 10px; }
@@ -641,7 +653,6 @@ export default function SimulationDashboard() {
     const top3 = RAW.slice(0, 3);
     const contenders = RAW.slice(3, 10);
 
-    // Ticker items: top 10 teams + separator items
     const tickerItems = [
         ...RAW.slice(0, 10).map(d => ({ team: d.team, pct: d.win.toFixed(1) })),
         { sep: true, text: "48 TEAMS · 104 MATCHES" },

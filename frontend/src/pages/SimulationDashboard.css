@@ -141,9 +141,10 @@ body {
 .hero {
     position: relative;
     background: linear-gradient(135deg, #0a0c10 0%, #0d1020 50%, #0a0c10 100%);
-    padding: 60px 40px 50px;
     overflow: hidden;
     border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
 }
 
 .hero::before {
@@ -167,11 +168,14 @@ body {
     pointer-events: none;
 }
 
+/* FIX: hero-content owns the padding — hero itself has none */
 .hero-content {
     position: relative;
     z-index: 1;
     max-width: 1400px;
+    width: 100%;
     margin: 0 auto;
+    padding: 40px 40px 32px;
 }
 
 .hero-eyebrow {
@@ -194,14 +198,16 @@ body {
     background: var(--lime);
 }
 
+/* FIX: no white-space: nowrap — title wraps naturally; clear margin below */
 .hero-title {
     font-family: var(--font-display);
     font-weight: 900;
-    font-size: clamp(52px, 7vw, 96px);
+    font-size: clamp(48px, 7vw, 96px);
     line-height: 0.92;
     letter-spacing: -0.01em;
     text-transform: uppercase;
-    margin-bottom: 8px;
+    margin-bottom: 28px;
+    white-space: normal;
 }
 
 .hero-title em {
@@ -222,12 +228,18 @@ body {
     display: flex;
     gap: 0;
     flex-wrap: wrap;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    overflow: hidden;
+    width: fit-content;
+    max-width: 100%;
 }
 
 .hero-stat {
-    padding: 16px 32px 16px 0;
+    padding: 14px 24px;
     border-right: 1px solid var(--border);
-    margin-right: 32px;
+    text-align: left;
 }
 
 .hero-stat:last-child {
@@ -237,7 +249,7 @@ body {
 .hero-stat-num {
     font-family: var(--font-display);
     font-weight: 900;
-    font-size: 36px;
+    font-size: 28px;
     line-height: 1;
     color: var(--lime);
 }
@@ -267,6 +279,12 @@ body {
     display: flex;
     align-items: center;
     padding: 0 40px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.nav-inner::-webkit-scrollbar {
+    display: none;
 }
 
 .nav-tab {
@@ -993,7 +1011,7 @@ body {
     text-align: right;
 }
 
-/* ── RADAR / PROFILE MODAL ── */
+/* ── MODAL ── */
 .modal-overlay {
     position: fixed;
     inset: 0;
@@ -1048,6 +1066,7 @@ body {
     margin-top: 4px;
     display: flex;
     gap: 12px;
+    flex-wrap: wrap;
 }
 
 .modal-close {
@@ -1204,8 +1223,8 @@ body {
         padding: 24px 20px;
     }
 
-    .hero {
-        padding: 40px 20px 36px;
+    .hero-content {
+        padding: 40px 20px 32px;
     }
 
     .nav-inner {
@@ -1217,40 +1236,152 @@ body {
     }
 
     .podium-grid {
-        grid-template-columns: 1fr 1fr 1fr;
         gap: 8px;
-    }
-}
-
-@media (max-width: 768px) {
-    .hero-title {
-        font-size: 46px;
-    }
-
-    .podium-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .contenders-row {
-        grid-template-columns: repeat(3, 1fr);
     }
 
     .bc-row {
         grid-template-columns: 120px 1fr 44px;
+    }
+}
+
+/* FIX: mobile — hero-content owns the padding, eliminates the dead black space */
+@media (max-width: 768px) {
+    .hero-content {
+        padding: 24px 16px 20px;
+    }
+
+    .hero-title {
+        font-size: clamp(36px, 10vw, 60px);
+        margin-bottom: 20px;
+    }
+
+    .hero-stats {
+        width: 100%;
+    }
+
+    .hero-stat {
+        padding: 10px 14px;
+    }
+
+    .hero-stat-num {
+        font-size: 22px;
+    }
+
+    .page-body {
+        padding: 20px 16px;
+    }
+
+    .nav-inner {
+        padding: 0 12px;
+    }
+
+    .nav-tab {
+        padding: 14px 14px;
+        font-size: 12px;
+    }
+
+    .podium-grid {
+        grid-template-columns: 1fr;
+        max-width: 360px;
+        margin-left: auto;
+        margin-right: auto;
+        align-items: start;
+    }
+
+    .podium-card.p1 {
+        order: -1;
+    }
+
+    .podium-card.p2 {
+        order: 0;
+    }
+
+    .podium-card.p3 {
+        order: 1;
+    }
+
+    .contenders-row {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+    }
+
+    .contender-name {
+        font-size: 10px;
+    }
+
+    .contender-pct {
+        font-size: 15px;
+    }
+
+    .bc-row {
+        grid-template-columns: 100px 1fr 40px;
+        gap: 8px;
+    }
+
+    .bc-label {
+        font-size: 11px;
+    }
+
+    .section-title {
+        font-size: 22px;
     }
 
     .modal-stat-grid {
         grid-template-columns: repeat(2, 1fr);
     }
 
-    .modal-card {
-        max-width: 100%;
+    .modal-team-name {
+        font-size: 22px;
+    }
+
+    .groups-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .filter-bar {
+        gap: 6px;
+    }
+
+    .search-box {
+        width: 100%;
+    }
+
+    .sort-select {
+        width: 100%;
     }
 }
 
 @media (max-width: 480px) {
+    .hero-title {
+        font-size: clamp(30px, 12vw, 44px);
+    }
+
+    .hero-stat-num {
+        font-size: 18px;
+    }
+
+    .hero-stat-label {
+        font-size: 9px;
+    }
+
+    .hero-stat {
+        padding: 8px 10px;
+    }
+
     .contenders-row {
         grid-template-columns: repeat(2, 1fr);
+    }
+
+    .bc-row {
+        grid-template-columns: 90px 1fr 36px;
+    }
+
+    .bc-label {
+        font-size: 10px;
+    }
+
+    .mp-row {
+        grid-template-columns: 75px 1fr 40px;
     }
 }
 
