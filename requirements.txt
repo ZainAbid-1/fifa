@@ -6,3 +6,4 @@ xgboost
 pydantic
 python-multipart
 gunicorn
+scikit-learn
