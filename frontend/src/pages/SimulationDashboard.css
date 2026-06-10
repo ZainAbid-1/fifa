@@ -78,12 +78,14 @@ body {
 }
 
 /* ── TICKER ── */
-.ticker-bar {
-    background: var(--red);
-    overflow: hidden;
-    height: 36px;
+.ticker-wrapper {
     display: flex;
     align-items: center;
+    background: var(--red);
+    height: 36px;
+    overflow: hidden;
+    width: 100%;
+    flex-shrink: 0;
 }
 
 .ticker-label {
@@ -91,21 +93,40 @@ body {
     color: #000;
     font-family: var(--font-display);
     font-weight: 800;
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: 0.12em;
-    padding: 0 16px;
+    padding: 0 12px;
     height: 100%;
     display: flex;
     align-items: center;
     white-space: nowrap;
     flex-shrink: 0;
     text-transform: uppercase;
+    gap: 6px;
+}
+
+.ticker-dot {
+    width: 6px;
+    height: 6px;
+    background: #000;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+.ticker-scroll {
+    flex: 1;
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    align-items: center;
 }
 
 .ticker-track {
     display: flex;
     animation: ticker 50s linear infinite;
     white-space: nowrap;
+    align-items: center;
 }
 
 .ticker-track:hover {
@@ -117,14 +138,22 @@ body {
     font-weight: 700;
     font-size: 13px;
     letter-spacing: 0.05em;
-    padding: 0 32px;
+    padding: 0 28px;
     color: #fff;
     text-transform: uppercase;
+    white-space: nowrap;
 }
 
-.ticker-item span {
+.ticker-item span,
+.ti-pct {
     color: var(--lime);
     margin-left: 6px;
+}
+
+.ti-sep {
+    color: rgba(255, 255, 255, 0.4) !important;
+    margin-right: 6px;
+    margin-left: 0 !important;
 }
 
 @keyframes ticker {
@@ -141,7 +170,7 @@ body {
 .hero {
     position: relative;
     background: linear-gradient(135deg, #0a0c10 0%, #0d1020 50%, #0a0c10 100%);
-    overflow: hidden;
+    overflow: visible;
     border-bottom: 1px solid var(--border);
     display: flex;
     flex-direction: column;
@@ -168,7 +197,6 @@ body {
     pointer-events: none;
 }
 
-/* FIX: hero-content owns the padding — hero itself has none */
 .hero-content {
     position: relative;
     z-index: 1;
@@ -198,7 +226,6 @@ body {
     background: var(--lime);
 }
 
-/* FIX: no white-space: nowrap — title wraps naturally; clear margin below */
 .hero-title {
     font-family: var(--font-display);
     font-weight: 900;
@@ -374,6 +401,7 @@ body {
     position: relative;
     overflow: hidden;
     transition: transform 0.2s;
+    cursor: pointer;
 }
 
 .podium-card:hover {
@@ -684,11 +712,6 @@ body {
     color: var(--lime);
 }
 
-.sim-table th .sort-arrow {
-    margin-left: 4px;
-    opacity: 0.6;
-}
-
 .sim-table tbody tr {
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     transition: background 0.12s;
@@ -739,10 +762,6 @@ body {
     gap: 10px;
 }
 
-.team-flag img {
-    border-radius: 2px;
-}
-
 .team-info {
     display: flex;
     flex-direction: column;
@@ -782,34 +801,6 @@ body {
 
 .td-bar {
     width: 180px;
-}
-
-.bar-cell {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.bar-track {
-    flex: 1;
-    height: 5px;
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 3px;
-    overflow: hidden;
-}
-
-.bar-fill {
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.6s ease;
-}
-
-.bar-val {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-muted);
-    width: 38px;
-    text-align: right;
 }
 
 .td-advance {
@@ -875,18 +866,11 @@ body {
     padding: 10px 18px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     transition: background 0.12s;
-}
-
-.group-team-row:last-child {
-    border-bottom: none;
+    cursor: pointer;
 }
 
 .group-team-row:hover {
     background: var(--bg-row-alt);
-}
-
-.gtr-flag img {
-    border-radius: 2px;
 }
 
 .gtr-name {
@@ -930,10 +914,6 @@ body {
 }
 
 /* ── CHART VIEW ── */
-.chart-section {
-    margin-bottom: 40px;
-}
-
 .chart-title {
     font-family: var(--font-display);
     font-weight: 800;
@@ -960,6 +940,7 @@ body {
     grid-template-columns: 160px 1fr 52px;
     align-items: center;
     gap: 12px;
+    cursor: pointer;
 }
 
 .bc-label {
@@ -992,13 +973,6 @@ body {
 .bc-fill {
     height: 100%;
     border-radius: 2px;
-    display: flex;
-    align-items: center;
-    padding-left: 8px;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: rgba(0, 0, 0, 0.7);
-    font-weight: bold;
     min-width: 20px;
     transition: width 0.8s cubic-bezier(.4, 0, .2, 1);
 }
@@ -1044,11 +1018,6 @@ body {
     display: flex;
     align-items: center;
     gap: 18px;
-}
-
-.modal-flag img {
-    border-radius: 4px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .modal-team-name {
@@ -1217,7 +1186,7 @@ body {
     }
 }
 
-/* ── RESPONSIVE ── */
+/* ── RESPONSIVE 1024px ── */
 @media (max-width: 1024px) {
     .page-body {
         padding: 24px 20px;
@@ -1244,45 +1213,140 @@ body {
     }
 }
 
-/* FIX: mobile — hero-content owns the padding, eliminates the dead black space */
+/* ── RESPONSIVE 768px ── */
 @media (max-width: 768px) {
+
+    /* Hero: block layout, sized purely by content */
+    .hero {
+        display: block !important;
+        overflow: visible !important;
+        min-height: 0 !important;
+        height: auto !important;
+        padding: 0 !important;
+        background: #0a0c10 !important;
+    }
+
+    /* Nuke all decorative children */
+    .hero-grid-bg {
+        display: none !important;
+    }
+
+    .hero::before,
+    .hero::after {
+        display: none !important;
+    }
+
     .hero-content {
-        padding: 24px 16px 20px;
+        position: static !important;
+        display: block !important;
+        padding: 90px 16px 40px !important;
+        min-height: 0 !important;
+        height: auto !important;
+        width: 100% !important;
+        overflow: visible !important;
     }
 
     .hero-title {
-        font-size: clamp(36px, 10vw, 60px);
-        margin-bottom: 20px;
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        font-size: clamp(30px, 8.5vw, 44px) !important;
+        line-height: 1 !important;
+        margin-bottom: 14px !important;
+        white-space: normal !important;
+        word-break: break-word !important;
+        color: #f0f2f5 !important;
+        position: static !important;
+        z-index: auto !important;
     }
 
+    .hero-title em {
+        color: var(--lime) !important;
+    }
+
+    .hero-subtitle {
+        display: none;
+    }
+
+    /* Stats: full-width, wrap into 2×3 grid on mobile */
     .hero-stats {
         width: 100%;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border-radius: var(--radius-md);
+        margin-bottom: 0;
     }
 
+    /* Every stat cell gets a bottom border for the 2nd row */
     .hero-stat {
-        padding: 10px 14px;
+        padding: 10px 12px;
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+    }
+
+    /* Remove right border from last in each row */
+    .hero-stat:nth-child(3),
+    .hero-stat:nth-child(5) {
+        border-right: none;
+    }
+
+    /* Remove bottom border from last row */
+    .hero-stat:nth-child(4),
+    .hero-stat:nth-child(5) {
+        border-bottom: none;
+    }
+
+    /* If only 5 stats, last one spans */
+    .hero-stat:last-child:nth-child(5) {
+        border-right: none;
+        border-bottom: none;
     }
 
     .hero-stat-num {
         font-size: 22px;
     }
 
-    .page-body {
-        padding: 20px 16px;
+    .hero-stat-label {
+        font-size: 9px;
+        letter-spacing: 0.1em;
     }
 
+    /* Ticker */
+    .ticker-wrapper {
+        flex: 0 0 32px !important;
+        height: 32px !important;
+        min-height: 0 !important;
+    }
+
+    .ticker-label {
+        font-size: 10px;
+        padding: 0 10px;
+    }
+
+    .ticker-item {
+        font-size: 11px;
+        padding: 0 20px;
+    }
+
+    /* Nav */
     .nav-inner {
         padding: 0 12px;
     }
 
     .nav-tab {
-        padding: 14px 14px;
+        padding: 14px 12px;
         font-size: 12px;
     }
 
+    /* Page body */
+    .page-body {
+        padding: 20px 16px;
+    }
+
+    /* Podium: single column, champion first */
     .podium-grid {
         grid-template-columns: 1fr;
-        max-width: 360px;
+        max-width: 400px;
         margin-left: auto;
         margin-right: auto;
         align-items: start;
@@ -1300,6 +1364,11 @@ body {
         order: 1;
     }
 
+    .podium-pct {
+        font-size: 30px;
+    }
+
+    /* Contenders */
     .contenders-row {
         grid-template-columns: repeat(3, 1fr);
         gap: 6px;
@@ -1313,6 +1382,7 @@ body {
         font-size: 15px;
     }
 
+    /* Bar chart labels */
     .bc-row {
         grid-template-columns: 100px 1fr 40px;
         gap: 8px;
@@ -1322,10 +1392,12 @@ body {
         font-size: 11px;
     }
 
+    /* Section title */
     .section-title {
         font-size: 22px;
     }
 
+    /* Modal */
     .modal-stat-grid {
         grid-template-columns: repeat(2, 1fr);
     }
@@ -1334,10 +1406,12 @@ body {
         font-size: 22px;
     }
 
+    /* Groups */
     .groups-grid {
         grid-template-columns: 1fr;
     }
 
+    /* Filter */
     .filter-bar {
         gap: 6px;
     }
@@ -1351,9 +1425,20 @@ body {
     }
 }
 
+/* ── RESPONSIVE 480px ── */
 @media (max-width: 480px) {
+    .hero-content {
+        padding: 16px 12px 14px;
+    }
+
     .hero-title {
-        font-size: clamp(30px, 12vw, 44px);
+        font-size: clamp(30px, 12vw, 40px);
+        margin-bottom: 12px;
+    }
+
+    /* Stats: 3-col stays but tighter */
+    .hero-stat {
+        padding: 8px 8px;
     }
 
     .hero-stat-num {
@@ -1361,19 +1446,22 @@ body {
     }
 
     .hero-stat-label {
-        font-size: 9px;
+        font-size: 8px;
+        letter-spacing: 0.08em;
     }
 
-    .hero-stat {
-        padding: 8px 10px;
+    .ticker-label {
+        display: none;
     }
+
+    /* save space — just scroll on very small screens */
 
     .contenders-row {
         grid-template-columns: repeat(2, 1fr);
     }
 
     .bc-row {
-        grid-template-columns: 90px 1fr 36px;
+        grid-template-columns: 88px 1fr 36px;
     }
 
     .bc-label {
@@ -1381,7 +1469,7 @@ body {
     }
 
     .mp-row {
-        grid-template-columns: 75px 1fr 40px;
+        grid-template-columns: 72px 1fr 40px;
     }
 }
 
