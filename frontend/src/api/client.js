@@ -1,10 +1,22 @@
 // API base URL — change to your backend URL in production
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+function getSessionId() {
+  let sid = localStorage.getItem('fifa_session_id');
+  if (!sid) {
+    sid = Math.random().toString(36).substring(2, 15);
+    localStorage.setItem('fifa_session_id', sid);
+  }
+  return sid;
+}
+
 async function request(method, path, body) {
   const opts = {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'X-Session-Id': getSessionId()
+    },
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
   const res = await fetch(`${BASE}${path}`, opts);

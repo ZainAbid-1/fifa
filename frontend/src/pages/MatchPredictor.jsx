@@ -160,7 +160,7 @@ function PlayerModal({ squad, posGroup, onSelect, onClose, selectedPlayers }) {
                   {p.pac > 0 && <span className="mpr-stat"><span>PAC</span>{p.pac}</span>}
                   {p.sho > 0 && <span className="mpr-stat"><span>SHO</span>{p.sho}</span>}
                   {p.pas > 0 && <span className="mpr-stat"><span>PAS</span>{p.pas}</span>}
-                  <span className="mpr-ovr" style={{ color: ratingColor(p.overall) }}>{p.overall}</span>
+                  <span className="mpr-ovr">{p.overall}</span>
                 </div>
               </button>
             );

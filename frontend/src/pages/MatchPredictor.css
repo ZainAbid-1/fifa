@@ -516,7 +516,7 @@
   font-family: var(--font-sub);
   font-size: 1.2rem;
   font-weight: 600;
-  color: var(--text);
+  color: #ffffff;
 }
 
 .mpr-right {
@@ -533,7 +533,7 @@
   font-family: var(--font-display);
   font-size: 1.1rem;
   font-weight: 700;
-  color: var(--text);
+  color: #ffffff;
 }
 
 .mpr-stat span {
@@ -550,6 +550,7 @@
   font-weight: 900;
   min-width: 40px;
   text-align: right;
+  color: #ffffff;
 }
 
 /* ── Centre Column ─────────────────────────────────────────────── */

@@ -21,8 +21,9 @@ import json
 import math
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
+from copy import deepcopy
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
@@ -254,15 +255,16 @@ def read_root():
 # =============================================================================
 
 @app.get("/api/squads")
-def get_squads():
+def get_squads(x_session_id: str = Header("default")):
     """
     Return all 48 team squads with:
       - Full player roster (name, position, overall, individual stats, injured)
       - Current aggregated team rating (recomputed from live squad state)
       - Confederation tag
     """
-    squad_state      = app_state["squad_state"]
-    computed_ratings = app_state["computed_ratings"]
+    session = get_session(x_session_id)
+    squad_state      = session["squad_state"]
+    computed_ratings = session["computed_ratings"]
 
     teams_out = []
     for team, players in squad_state.items():
@@ -285,9 +287,10 @@ class PlayerActionRequest(BaseModel):
 
 
 @app.post("/api/injure_player")
-def injure_player(req: PlayerActionRequest):
+def injure_player(req: PlayerActionRequest, x_session_id: str = Header("default")):
     """Mark a player as injured and recompute the team's aggregated rating."""
-    squad_state = app_state["squad_state"]
+    session = get_session(x_session_id)
+    squad_state = session["squad_state"]
     if req.team not in squad_state:
         raise HTTPException(status_code=404, detail=f"Team '{req.team}' not found")
 
@@ -300,10 +303,7 @@ def injure_player(req: PlayerActionRequest):
 
     # Recompute rating
     new_rating = compute_team_rating_from_squad(players)
-    app_state["computed_ratings"][req.team] = new_rating
-
-    # Update the live ea_df used by penalty_win_prob etc.
-    _update_ea_df(req.team, new_rating)
+    session["computed_ratings"][req.team] = new_rating
 
     return {
         "status":     "injured",
@@ -314,9 +314,10 @@ def injure_player(req: PlayerActionRequest):
 
 
 @app.post("/api/restore_player")
-def restore_player(req: PlayerActionRequest):
+def restore_player(req: PlayerActionRequest, x_session_id: str = Header("default")):
     """Restore an injured player and recompute the team's aggregated rating."""
-    squad_state = app_state["squad_state"]
+    session = get_session(x_session_id)
+    squad_state = session["squad_state"]
     if req.team not in squad_state:
         raise HTTPException(status_code=404, detail=f"Team '{req.team}' not found")
 
@@ -328,8 +329,7 @@ def restore_player(req: PlayerActionRequest):
     matched[0]["injured"] = False
 
     new_rating = compute_team_rating_from_squad(players)
-    app_state["computed_ratings"][req.team] = new_rating
-    _update_ea_df(req.team, new_rating)
+    session["computed_ratings"][req.team] = new_rating
 
     return {
         "status":     "restored",
@@ -337,21 +337,6 @@ def restore_player(req: PlayerActionRequest):
         "player":     req.player,
         "new_rating": new_rating,
     }
-
-
-def _update_ea_df(team: str, new_rating: dict):
-    """Keep app_state ea_df in sync so penalty_win_prob() uses fresh ratings."""
-    ea_df = app_state["ea_df"]
-    mask  = ea_df["team"] == team
-    if mask.any():
-        ea_df.loc[mask, "overall"]  = new_rating["overall"]
-        ea_df.loc[mask, "attack"]   = new_rating["attack"]
-        ea_df.loc[mask, "midfield"] = new_rating["midfield"]
-        ea_df.loc[mask, "defense"]  = new_rating["defense"]
-    else:
-        # Team missing in ea_df (shouldn't happen, but guard anyway)
-        new_row = pd.DataFrame([{"team": team, **new_rating}])
-        app_state["ea_df"] = pd.concat([ea_df, new_row], ignore_index=True)
 
 
 # =============================================================================
@@ -376,6 +361,17 @@ single_tournament = {
     "champion": None,
     "seed": 42
 }
+
+sessions = {}
+
+def get_session(session_id: str):
+    if session_id not in sessions:
+        sessions[session_id] = {
+            "squad_state": deepcopy(app_state.get("squad_state", {})),
+            "computed_ratings": deepcopy(app_state.get("computed_ratings", {})),
+            "tournament": deepcopy(single_tournament)
+        }
+    return sessions[session_id]
 
 def sample_ko_match_detailed(home, away, form_tracker, rng, ea_df):
     """Simulate a knockout match and return rich metadata about goals/extra time/shootouts."""
@@ -469,16 +465,17 @@ def sample_ko_match_detailed(home, away, form_tracker, rng, ea_df):
 
 
 @app.post("/api/tournament/start")
-def start_tournament(seed: Optional[int] = None):
+def start_tournament(seed: Optional[int] = None, x_session_id: str = Header("default")):
     """Reset the step-by-step tournament simulation to the Group Stage."""
     if "teams_df" not in app_state or "fixture_data" not in app_state:
         raise HTTPException(status_code=503, detail="API models/data not fully loaded yet.")
         
+    session = get_session(x_session_id)
     teams_df = app_state["teams_df"]
     fixture_data = app_state["fixture_data"]
     
     selected_seed = seed if seed is not None else int(time.time() * 1000) % 100000
-    single_tournament["seed"] = selected_seed
+    session["tournament"]["seed"] = selected_seed
     
     # Initialize Group Stage Fixtures
     wc = app_state.get("wc")
@@ -538,7 +535,7 @@ def start_tournament(seed: Optional[int] = None):
             })
         return fx
 
-    single_tournament.update({
+    session["tournament"].update({
         "stage": "group_stage",
         "fixtures": {
             "group_stage": group_fixtures,
@@ -563,31 +560,33 @@ def start_tournament(seed: Optional[int] = None):
 
 
 @app.get("/api/tournament/state")
-def get_tournament_state():
+def get_tournament_state(x_session_id: str = Header("default")):
     """Get the current state of the step-by-step single tournament simulation."""
-    return single_tournament
+    session = get_session(x_session_id)
+    return session["tournament"]
 
 
 class SimulateDayRequest(BaseModel):
     match_ids: List[str]
 
 @app.post("/api/tournament/simulate_day")
-def simulate_day(req: SimulateDayRequest):
-    stage = single_tournament["stage"]
+def simulate_day(req: SimulateDayRequest, x_session_id: str = Header("default")):
+    session = get_session(x_session_id)
+    stage = session["tournament"]["stage"]
     if stage == "not_started" or stage == "finished":
         raise HTTPException(status_code=400, detail="Tournament not started.")
 
-    rng = np.random.default_rng(single_tournament["seed"])
-    live_ea_df = ratings_to_df(app_state["computed_ratings"])
+    rng = np.random.default_rng(session["tournament"]["seed"])
+    live_ea_df = ratings_to_df(session["computed_ratings"])
     
-    fixtures = single_tournament["fixtures"][stage]
+    fixtures = session["tournament"]["fixtures"][stage]
     fixture_data = app_state.get("fixture_data", [])
     fd_map = {(fd["home"], fd["away"]): fd for fd in fixture_data}
     
     form_tracker = predict_wc.FormTracker()
     for s in ["group_stage", "r32", "r16", "qf", "sf", "third_place"]:
-        if s in single_tournament["fixtures"]:
-            for m in single_tournament["fixtures"][s]:
+        if s in session["tournament"]["fixtures"]:
+            for m in session["tournament"]["fixtures"][s]:
                 if m.get("played"):
                     form_tracker.update(m["home"], m["away"], m["home_goals"], m["away_goals"])
 
@@ -632,7 +631,7 @@ def simulate_day(req: SimulateDayRequest):
                     "pen_away_score": int(res["pen_away_score"])
                 })
 
-    single_tournament["seed"] = int(single_tournament["seed"] * 31 + 17) % 1000000
+    session["tournament"]["seed"] = int(session["tournament"]["seed"] * 31 + 17) % 1000000
 
     if stage == "group_stage":
         pts = defaultdict(int)
@@ -687,7 +686,7 @@ def simulate_day(req: SimulateDayRequest):
                     "pts": int(pts[t])
                 })
             group_stats.sort(key=lambda x: (x["pts"], x["gd"], x["gf"]), reverse=True)
-            single_tournament["standings"][group] = group_stats
+            session["tournament"]["standings"][group] = group_stats
 
     return {"status": "simulated_day", "stage": stage}
 
